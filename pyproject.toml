@@ -1,0 +1,43 @@
+[project]
+name = "explainlaw"
+version = "0.1.0"
+description = "ExplainLaw — база НПА и мониторинг законодательства (Шаг 1)"
+requires-python = ">=3.11"
+dependencies = [
+    "sqlalchemy>=2.0",
+    "alembic>=1.13",
+    "psycopg[binary]>=3.1",
+    "pydantic-settings>=2.0",
+    "pydantic>=2.0",
+    "minio>=7.2",
+    "confluent-kafka>=2.3",
+    "httpx>=0.27",
+    "fastapi>=0.111",
+    "uvicorn[standard]>=0.29",
+    "pymupdf>=1.24",
+]
+
+[project.scripts]
+explainlaw = "explainlaw.cli:main"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.4",
+]
+ocr = [
+    "pytesseract>=0.3",
+    "pdf2image>=1.17",
+    "Pillow>=10.0",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
