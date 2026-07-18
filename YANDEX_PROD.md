@@ -8,7 +8,7 @@ VPS больше не используется. Прод-целевая схем
 |-----------|------|
 | PostgreSQL | Yandex Managed PG (`DATABASE_URL`, `DATABASE_SSLMODE=require`) |
 | Kafka | Yandex Managed Kafka SASL_SSL (`KAFKA_*`, `LLM_TRANSPORT=kafka`) |
-| Сырьё PDF | MinIO / S3-совместимое хранилище (`MINIO_*`) |
+| Сырьё PDF | Yandex Object Storage (`AWS_*` → бакет `explain-npa`) или MinIO |
 | Qwen worker | Подписчик `llm.requests` → `llm.responses` |
 | Gateway | Облачный OpenAI-совместимый API для публичных сводок |
 | Cron | Любой хост с Python 3.11+ и доступом к PG/Kafka/MinIO |
@@ -25,6 +25,14 @@ pip install -e ".[dev,ocr]"   # + paddle при необходимости: pip 
 
 Ключевые переменные:
 
+- Object Storage (прод):
+  ```bash
+  AWS_ENDPOINT_URL=https://storage.yandexcloud.net
+  AWS_KEY_ID=...
+  AWS_SECRET_KEY=...
+  AWS_BUCKET=explain-npa
+  ```
+  Один бакет на PDF/ZIP и HTML-снимки. Сейчас бакет пустой — PDF появятся после `collect` / `backfill-pdfs` или заливки `minio_data.tar.gz`.
 - `LLM_TRANSPORT=kafka` + `KAFKA_PIPELINE_EVENTS=false` — если ACL только на `llm.*`
 - `OCR_ENGINE=paddle|tesseract|yandex` — публичного SberOCR API **нет**
 - `TELEGRAM_*` / `ALERT_WEBHOOK_URL` / `ALERT_LOG_PATH` — алерты §11

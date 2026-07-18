@@ -1,3 +1,4 @@
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -7,12 +8,25 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://explainlaw:explainlaw@localhost:5432/explainlaw"
     database_sslmode: str = "prefer"
 
+    # Object storage: локальный MinIO или Yandex Object Storage (S3-совместимый).
+    # Можно задать AWS_ENDPOINT_URL / AWS_KEY_ID / AWS_SECRET_KEY / AWS_BUCKET
     minio_endpoint: str = "localhost:9000"
     minio_access_key: str = "explainlaw"
     minio_secret_key: str = "explainlawsecret"
     minio_bucket_raw: str = "npa-raw"
     minio_bucket_snapshots: str = "npa-snapshots"
     minio_secure: bool = False
+    minio_region: str = ""
+    # Общий prefix внутри бакета (опционально)
+    minio_prefix: str = ""
+
+    # Yandex / AWS S3 aliases
+    aws_endpoint_url: str = ""
+    aws_access_key_id: str = ""
+    aws_secret_access_key: str = ""
+    aws_bucket: str = ""
+    aws_key_id: str = ""  # AWS_KEY_ID
+    aws_secret_key: str = ""  # AWS_SECRET_KEY
 
     kafka_bootstrap_servers: str = "localhost:9092"
     kafka_enabled: bool = True
@@ -64,6 +78,32 @@ class Settings(BaseSettings):
 
     # LLM second-look / semantic gate (§9) — только после механики
     gate_llm_verify: bool = True
+
+    @model_validator(mode="after")
+    def apply_aws_object_storage_aliases(self) -> "Settings":
+        """Если заданы AWS_* — используем Yandex Object Storage / S3."""
+        endpoint = self.aws_endpoint_url.strip()
+        key = (self.aws_access_key_id or self.aws_key_id).strip()
+        secret = (self.aws_secret_access_key or self.aws_secret_key).strip()
+        bucket = self.aws_bucket.strip()
+
+        if not (endpoint or key or secret or bucket):
+            return self
+
+        if endpoint:
+            self.minio_endpoint = endpoint
+            self.minio_secure = endpoint.startswith("https://") or "yandexcloud" in endpoint
+            if "yandexcloud" in endpoint and not self.minio_region:
+                self.minio_region = "ru-central1"
+        if key:
+            self.minio_access_key = key
+        if secret:
+            self.minio_secret_key = secret
+        if bucket:
+            # Один бакет Yandex для raw + snapshots (имена файлов не пересекаются)
+            self.minio_bucket_raw = bucket
+            self.minio_bucket_snapshots = bucket
+        return self
 
 
 settings = Settings()
