@@ -2,9 +2,7 @@ import logging
 import re
 from dataclasses import dataclass
 
-from explainlaw.config import settings
 from explainlaw.db.models import ModelRoute
-from explainlaw.llm.client import ChatClient
 
 logger = logging.getLogger(__name__)
 
@@ -22,14 +20,6 @@ class SummaryResult:
     model_route: ModelRoute
 
 
-def _gateway_client() -> ChatClient:
-    return ChatClient(
-        base_url=settings.gateway_api_base,
-        api_key=settings.gateway_api_key,
-        model=settings.gateway_model,
-    )
-
-
 def _clean_title(name: str | None) -> str:
     if not name:
         return ""
@@ -38,7 +28,9 @@ def _clean_title(name: str | None) -> str:
     return title
 
 
-def _fallback_summary(*, number: str | None, document_date: str | None, name: str | None, fragment: str) -> str:
+def _fallback_summary(
+    *, number: str | None, document_date: str | None, name: str | None, fragment: str
+) -> str:
     """Механическая сводка из предъявленного текста — без генерации знаний."""
     title = _clean_title(name)
     header_parts = []
@@ -74,13 +66,24 @@ def generate_summary(
         f"Фрагмент текста закона:\n{fragment}"
     )
 
-    client = _gateway_client()
+    from explainlaw.llm.factory import create_gateway_client, create_qwen_client
+
+    client = create_gateway_client()
     if client.available:
         try:
             text = client.chat(system=_GATEWAY_SYSTEM, user=context)
             return SummaryResult(text=text, model_route=ModelRoute.gateway)
         except Exception:
-            logger.exception("Gateway недоступен, используем fallback")
+            logger.exception("Gateway недоступен, пробуем Qwen на grounded контексте")
+
+    # Qwen допустим как обработчик предъявленного текста (§8.1 / перспектива)
+    qwen = create_qwen_client()
+    if qwen.available:
+        try:
+            text = qwen.chat(system=_GATEWAY_SYSTEM, user=context)
+            return SummaryResult(text=text, model_route=ModelRoute.qwen)
+        except Exception:
+            logger.exception("Qwen недоступен, используем механический fallback")
 
     return SummaryResult(
         text=_fallback_summary(

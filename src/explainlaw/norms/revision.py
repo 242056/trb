@@ -80,6 +80,16 @@ class NormRevisionAssembler:
         return current_text
 
     def _write_cache(self, norm_id: UUID, as_of_date: date, text: str) -> None:
+        existing = self._session.execute(
+            select(NormRevisionCache).where(
+                NormRevisionCache.norm_id == norm_id,
+                NormRevisionCache.as_of_date == as_of_date,
+            )
+        ).scalar_one_or_none()
+        if existing:
+            existing.assembled_text = text
+            existing.invalidated_at = None
+            return
         cache = NormRevisionCache(
             norm_id=norm_id,
             as_of_date=as_of_date,

@@ -15,7 +15,6 @@ from explainlaw.gates.text_checks import (
     extract_summary_numbers,
     normalize_whitespace,
 )
-from explainlaw.llm.client import ChatClient
 
 logger = logging.getLogger(__name__)
 
@@ -30,17 +29,27 @@ class SummaryGateResult:
     flags: list[FlagDraft] = field(default_factory=list)
 
 
-def _gateway_client() -> ChatClient:
-    return ChatClient(
-        base_url=settings.gateway_api_base,
-        api_key=settings.gateway_api_key,
-        model=settings.gateway_model,
-    )
-
-
 def _semantic_verify(summary_text: str, context: str) -> list[FlagDraft]:
-    client = _gateway_client()
-    if not client.available:
+    if not settings.gate_llm_verify:
+        return []
+
+    client = None
+    try:
+        from explainlaw.llm.factory import create_gateway_client, create_qwen_client
+
+        # Gateway — лицо продукта; при недоступности — Qwen на grounded контексте (§8.1)
+        gw = create_gateway_client()
+        if gw.available:
+            client = gw
+        else:
+            qwen = create_qwen_client()
+            if qwen.available:
+                client = qwen
+    except Exception:
+        logger.exception("Клиент семантической проверки недоступен")
+        return []
+
+    if client is None or not client.available:
         return []
 
     try:
@@ -109,19 +118,24 @@ def run_summary_gate(
                 )
             )
 
-    flags.extend(
-        _semantic_verify(
-            summary.summary_text,
-            json.dumps(
-                {
-                    "number": doc.number,
-                    "document_date": doc.document_date.isoformat() if doc.document_date else None,
-                    "name": doc.name,
-                    "delta": changes,
-                },
-                ensure_ascii=False,
-            ),
+    # Семантика — только после механики (§9)
+    if not flags:
+        flags.extend(
+            _semantic_verify(
+                summary.summary_text,
+                json.dumps(
+                    {
+                        "number": doc.number,
+                        "document_date": (
+                            doc.document_date.isoformat() if doc.document_date else None
+                        ),
+                        "name": doc.name,
+                        "source_url": doc.source_url,
+                        "delta": changes,
+                    },
+                    ensure_ascii=False,
+                ),
+            )
         )
-    )
 
     return SummaryGateResult(passed=len(flags) == 0, flags=flags)

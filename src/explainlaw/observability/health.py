@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -87,8 +88,23 @@ def check_health(session: Session) -> dict[str, Any]:
     }
 
 
+def _append_alert_log(health: dict[str, Any]) -> None:
+    path = Path(settings.alert_log_path)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        record = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "healthy": health.get("healthy"),
+            "alerts": health.get("alerts"),
+        }
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except Exception:
+        logger.exception("Не удалось записать alert log %s", path)
+
+
 def send_alert_webhook(health: dict[str, Any]) -> bool:
-    if not settings.alert_webhook_url or health.get("healthy"):
+    if health.get("healthy") or not settings.alert_webhook_url:
         return False
 
     payload = {
@@ -104,5 +120,37 @@ def send_alert_webhook(health: dict[str, Any]) -> bool:
         response.raise_for_status()
         return True
     except Exception:
-        logger.exception("Не удалось отправить алерт")
+        logger.exception("Не удалось отправить webhook-алерт")
         return False
+
+
+def send_telegram_alert(health: dict[str, Any]) -> bool:
+    if health.get("healthy"):
+        return False
+    token = settings.telegram_bot_token
+    chat_id = settings.telegram_chat_id
+    if not token or not chat_id:
+        return False
+
+    text = "ExplainLaw: " + "; ".join(a["message"] for a in health.get("alerts", []))
+    try:
+        response = httpx.post(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            json={"chat_id": chat_id, "text": text[:4000]},
+            timeout=10.0,
+        )
+        response.raise_for_status()
+        return True
+    except Exception:
+        logger.exception("Не удалось отправить Telegram-алерт")
+        return False
+
+
+def send_alerts(health: dict[str, Any]) -> bool:
+    """Файл-лог + webhook + Telegram при проблемах. Возвращает True если что-то ушло наружу."""
+    if health.get("healthy"):
+        return False
+    _append_alert_log(health)
+    sent_webhook = send_alert_webhook(health)
+    sent_tg = send_telegram_alert(health)
+    return sent_webhook or sent_tg

@@ -22,6 +22,12 @@ _AMENDMENT_NAME_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Ратификации международных протоколов — не поправки к российским ФЗ
+_NON_FZ_AMENDMENT_NAME_RE = re.compile(
+    r"ратификац|о\s+принятии\s+протокола",
+    re.IGNORECASE,
+)
+
 _ADDRESS_PATCH_RE = re.compile(
     r"(заменить|дополнить|исключить|признать|утратить)\s+",
     re.IGNORECASE,
@@ -51,6 +57,8 @@ class ScopedNormChange:
 
 def is_amendment_law(name: str | None) -> bool:
     if not name:
+        return False
+    if _NON_FZ_AMENDMENT_NAME_RE.search(name):
         return False
     return bool(_AMENDMENT_NAME_RE.search(name))
 

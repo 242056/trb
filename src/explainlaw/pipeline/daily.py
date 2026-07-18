@@ -14,7 +14,8 @@ from explainlaw.content.publisher import WeeklyPublisher
 from explainlaw.db.models import PipelineJobType
 from explainlaw.gates.runner import GateRunner
 from explainlaw.missing_acts.fetcher import MissingActsFetcher
-from explainlaw.observability.health import check_health, send_alert_webhook
+from explainlaw.observability.health import check_health
+from explainlaw.observability.health import send_alerts as dispatch_alerts
 from explainlaw.observability.recorder import record_run
 from explainlaw.pipeline.processor import DocumentProcessor
 from explainlaw.storage.object_store import ObjectStorage
@@ -110,7 +111,7 @@ class DailyPipeline:
             if weekly_publish:
                 publish_stats = WeeklyPublisher(
                     self._session, kafka_producer=self._kafka
-                ).run()
+                ).run(mark_published=True)
                 stats.publish = publish_stats.to_dict()
                 record_run(
                     self._session,
@@ -121,7 +122,7 @@ class DailyPipeline:
             self._session.commit()
             stats.health = check_health(self._session)
             if send_alerts:
-                stats.alert_sent = send_alert_webhook(stats.health)
+                stats.alert_sent = dispatch_alerts(stats.health)
 
             record_run(
                 self._session,

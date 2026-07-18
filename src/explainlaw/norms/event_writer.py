@@ -8,7 +8,6 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from explainlaw.config import settings
 from explainlaw.db.models import (
     ApplyKind,
     ApplyStatus,
@@ -18,7 +17,6 @@ from explainlaw.db.models import (
     OperationType,
 )
 from explainlaw.extraction.article_text import extract_article_text
-from explainlaw.llm.client import ChatClient
 
 logger = logging.getLogger(__name__)
 
@@ -56,12 +54,10 @@ class NormChangeDraft:
     effective_date: date | None
 
 
-def _qwen_client() -> ChatClient:
-    return ChatClient(
-        base_url=settings.qwen_api_base,
-        api_key=settings.qwen_api_key,
-        model=settings.qwen_model,
-    )
+def _qwen_client():
+    from explainlaw.llm.factory import create_qwen_client
+
+    return create_qwen_client()
 
 
 def _regex_extract(fragment: str) -> list[NormChangeDraft]:
@@ -212,13 +208,24 @@ def persist_norm_changes(
             select(Norm).where(Norm.stable_norm_id == stable_id)
         ).scalar_one_or_none()
         if norm is None:
-            norm = Norm(
-                stable_norm_id=stable_id,
-                parent_act_identifier=parent_act_identifier,
-                unit_address=draft.unit_address,
-            )
-            session.add(norm)
-            session.flush()
+            try:
+                with session.begin_nested():
+                    norm = Norm(
+                        stable_norm_id=stable_id,
+                        parent_act_identifier=parent_act_identifier,
+                        unit_address=draft.unit_address,
+                    )
+                    session.add(norm)
+                    session.flush()
+            except Exception as exc:
+                # UniqueViolation на concurrent insert — перечитываем
+                from sqlalchemy.exc import IntegrityError
+
+                if not isinstance(exc, IntegrityError):
+                    raise
+                norm = session.execute(
+                    select(Norm).where(Norm.stable_norm_id == stable_id)
+                ).scalar_one()
 
         article = (draft.unit_address or {}).get("статья")
         text_before = None
@@ -256,6 +263,19 @@ def persist_norm_changes(
             raw_reference_id=raw_reference_id,
         )
         session.add(event)
+        session.flush()
+
+        if (
+            draft.apply_kind == ApplyKind.full_redaction
+            and draft.text_after
+            and apply_status == ApplyStatus.applied
+        ):
+            from explainlaw.norms.revision import NormRevisionAssembler
+
+            assembler = NormRevisionAssembler(session)
+            assembler.invalidate_cache_for_norm(norm.id)
+            assembler.get_revision(norm.id, event.effective_date)
+
         written += 1
 
     return written

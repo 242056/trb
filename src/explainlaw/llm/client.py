@@ -1,8 +1,9 @@
-import json
 import logging
 from typing import Any
 
 import httpx
+
+from explainlaw.llm.json_utils import parse_json_lenient
 
 logger = logging.getLogger(__name__)
 
@@ -41,5 +42,4 @@ class ChatClient:
 
     def chat_json(self, *, system: str, user: str) -> dict[str, Any]:
         raw = self.chat(system=system, user=user, temperature=0.0)
-        raw = raw.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
-        return json.loads(raw)
+        return parse_json_lenient(raw)

@@ -184,12 +184,45 @@ class PravoApiClient:
         return response.json()
 
     def download_pdf(self, eo_number: str) -> bytes:
+        """Скачивает PDF. Для ~2011–2012 /File/pdf часто отдаёт ZIP с TIFF — конвертируем."""
         response = self._client.get(f"/File/pdf/{eo_number}")
         response.raise_for_status()
-        content_type = response.headers.get("content-type", "")
-        if "pdf" not in content_type and not response.content.startswith(b"%PDF"):
-            raise ValueError(f"Ответ для {eo_number} не похож на PDF")
-        return response.content
+        data = response.content
+        if data.startswith(b"%PDF"):
+            return data
+        if data.startswith(b"PK"):
+            from explainlaw.extraction.tiff_zip import tiff_zip_to_pdf
+
+            return tiff_zip_to_pdf(data)
+        raise ValueError(f"Ответ для {eo_number} не похож на PDF/ZIP (magic={data[:8]!r})")
+
+    def download_raw_file(self, eo_number: str) -> tuple[bytes, str]:
+        """Сырой ответ /File/pdf: (bytes, 'pdf'|'tiff_zip')."""
+        response = self._client.get(f"/File/pdf/{eo_number}")
+        response.raise_for_status()
+        data = response.content
+        if data.startswith(b"%PDF"):
+            return data, "pdf"
+        if data.startswith(b"PK"):
+            return data, "tiff_zip"
+        raise ValueError(f"Ответ для {eo_number} не похож на PDF/ZIP")
+
+    def download_zip(self, eo_number: str) -> bytes:
+        response = self._client.get(f"/File/zip/{eo_number}")
+        response.raise_for_status()
+        data = response.content
+        if not data.startswith(b"PK"):
+            raise ValueError(f"Ответ для {eo_number} не похож на ZIP")
+        return data
+
+    def download_svg(self, eo_number: str) -> bytes:
+        response = self._client.get(f"/File/svg/{eo_number}")
+        response.raise_for_status()
+        data = response.content
+        head = data[:200].lstrip().lower()
+        if b"<svg" not in head and b"<?xml" not in head:
+            raise ValueError(f"Ответ для {eo_number} не похож на SVG")
+        return data
 
     def download_page_snapshot(self, eo_number: str) -> bytes:
         response = self._client.get(f"/document/{eo_number}")

@@ -26,7 +26,7 @@ from explainlaw.db.session import SessionLocal
 from explainlaw.gates.runner import GateRunner
 from explainlaw.messaging.kafka import kafka_producer
 from explainlaw.missing_acts.fetcher import MissingActsFetcher
-from explainlaw.observability.health import check_health, send_alert_webhook
+from explainlaw.observability.health import check_health, send_alerts
 from explainlaw.observability.recorder import record_run
 from explainlaw.pipeline.daily import DailyPipeline
 from explainlaw.pipeline.processor import DocumentProcessor
@@ -82,6 +82,7 @@ def cmd_process(args: argparse.Namespace) -> int:
             kafka_producer=producer,
             force=args.force,
             amendments_only=args.amendments_only,
+            resume=getattr(args, "resume", False),
         )
         stats = processor.process(limit=args.limit)
         record_run(session, job_type=PipelineJobType.process, metrics=stats.to_dict())
@@ -142,14 +143,16 @@ def cmd_fetch_missing(args: argparse.Namespace) -> int:
 def cmd_rebuild_deltas(args: argparse.Namespace) -> int:
     """Пересобрать дельты для поправок и прогнать гейты (§8.3)."""
     storage = get_storage()
+    resume = getattr(args, "resume", False)
     with kafka_producer() as producer, SessionLocal() as session:
         processor = DocumentProcessor(
             session,
             storage,
             kafka_producer=producer,
-            force=True,
+            force=not resume,
             amendments_only=True,
             rebuild_deltas_only=True,
+            resume=resume,
         )
         process_stats = processor.process(limit=args.limit)
         record_run(session, job_type=PipelineJobType.process, metrics=process_stats.to_dict())
@@ -195,10 +198,44 @@ def cmd_health(args: argparse.Namespace) -> int:
     with SessionLocal() as session:
         health = check_health(session)
         if args.alert:
-            health["alert_sent"] = send_alert_webhook(health)
+            health["alert_sent"] = send_alerts(health)
 
     print(json.dumps(health, ensure_ascii=False, indent=2))
     return 0 if health.get("healthy") else 1
+
+
+def cmd_backfill_pdfs(args: argparse.Namespace) -> int:
+    """Догон PDF/TIFF-ZIP для документов без сырья."""
+    storage = get_storage()
+    with kafka_producer() as producer, SessionLocal() as session:
+        collector = DailyCollector(session, storage, kafka_producer=producer)
+        try:
+            stats = collector.backfill_missing_pdfs(limit=args.limit)
+            record_run(session, job_type=PipelineJobType.collect, metrics=stats)
+            session.commit()
+        finally:
+            collector.close()
+    print(json.dumps(stats, ensure_ascii=False, indent=2))
+    return 1 if stats.get("errors") and stats.get("fetched", 0) == 0 else 0
+
+
+def cmd_refresh_summaries(args: argparse.Namespace) -> int:
+    """Пересобрать сводки для документов с дельтой (Gateway/Qwen)."""
+    storage = get_storage()
+    with kafka_producer() as producer, SessionLocal() as session:
+        processor = DocumentProcessor(
+            session,
+            storage,
+            kafka_producer=producer,
+            force=True,
+            amendments_only=True,
+        )
+        # force пересоздаёт summaries; rebuild_deltas_only=False
+        stats = processor.process(limit=args.limit)
+        record_run(session, job_type=PipelineJobType.process, metrics=stats.to_dict())
+        session.commit()
+    print(json.dumps(stats.to_dict(), ensure_ascii=False, indent=2))
+    return 0
 
 
 def cmd_list(args: argparse.Namespace) -> int:
@@ -336,6 +373,11 @@ def main() -> None:
         action="store_true",
         help="Только законы о внесении изменений",
     )
+    p_process.add_argument(
+        "--resume",
+        action="store_true",
+        help="Пропускать документы, у которых дельта уже есть",
+    )
     p_process.set_defaults(func=cmd_process)
 
     p_gate = sub.add_parser("gate", help="Гейты качества (дельта + сводка) → post_bank")
@@ -371,7 +413,26 @@ def main() -> None:
         help="Пересобрать дельты поправок и прогнать гейты (§8.3)",
     )
     p_rebuild.add_argument("--limit", type=int, help="Обработать не более N поправок")
+    p_rebuild.add_argument(
+        "--resume",
+        action="store_true",
+        help="Только поправки без дельты (безопасный догон)",
+    )
     p_rebuild.set_defaults(func=cmd_rebuild_deltas)
+
+    p_backfill_pdf = sub.add_parser(
+        "backfill-pdfs",
+        help="Догон PDF/TIFF-ZIP для документов без сырья (§4.1)",
+    )
+    p_backfill_pdf.add_argument("--limit", type=int, help="Не более N документов")
+    p_backfill_pdf.set_defaults(func=cmd_backfill_pdfs)
+
+    p_refresh = sub.add_parser(
+        "refresh-summaries",
+        help="Пересобрать ИИ-сводки для поправок (Gateway/Qwen)",
+    )
+    p_refresh.add_argument("--limit", type=int, help="Не более N документов")
+    p_refresh.set_defaults(func=cmd_refresh_summaries)
 
     p_daily = sub.add_parser("daily", help="Ежедневный конвейер: collect → process → gate → fetch-missing")
     p_daily.add_argument("--date", help="День сбора YYYY-MM-DD (по умолчанию сегодня)")

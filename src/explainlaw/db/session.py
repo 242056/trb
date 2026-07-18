@@ -5,7 +5,15 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from explainlaw.config import settings
 
-engine = create_engine(settings.database_url, pool_pre_ping=True)
+_connect_args: dict = {}
+if settings.database_sslmode:
+    _connect_args["sslmode"] = settings.database_sslmode
+
+engine = create_engine(
+    settings.database_url,
+    pool_pre_ping=True,
+    connect_args=_connect_args,
+)
 SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 
 

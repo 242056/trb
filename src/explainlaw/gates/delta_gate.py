@@ -1,10 +1,13 @@
-"""Гейт №1 — механическая проверка дельты (§9.1)."""
+"""Гейт №1 — механическая проверка дельты (§9.1) + LLM second-look (§9)."""
 
 from __future__ import annotations
 
+import json
+import logging
 from dataclasses import dataclass, field
 from typing import Any
 
+from explainlaw.config import settings
 from explainlaw.db.models import DeltaCompleteness, NpaDelta, NpaDocument
 from explainlaw.gates.text_checks import (
     article_mentioned_in_source,
@@ -12,6 +15,12 @@ from explainlaw.gates.text_checks import (
     fz_number_in_source,
     verify_quote_in_source,
 )
+
+logger = logging.getLogger(__name__)
+
+_SECOND_LOOK_SYSTEM = """Ты проверяешь дельту изменений закона по исходному тексту.
+Верни JSON: {"ok": true|false, "issues": ["..."]}
+ok=true только если каждое изменение дельты следует из источника без выдуманных фактов."""
 
 
 @dataclass
@@ -25,6 +34,41 @@ class FlagDraft:
 class DeltaGateResult:
     passed: bool
     flags: list[FlagDraft] = field(default_factory=list)
+
+
+def _llm_second_look(source_text: str, changes: list[dict]) -> list[FlagDraft]:
+    if not settings.gate_llm_verify:
+        return []
+    try:
+        from explainlaw.llm.factory import create_qwen_client
+
+        client = create_qwen_client()
+        if not client.available:
+            from explainlaw.llm.factory import create_gateway_client
+
+            client = create_gateway_client()
+        if not client.available:
+            return []
+        data = client.chat_json(
+            system=_SECOND_LOOK_SYSTEM,
+            user=(
+                f"Источник (фрагмент):\n{source_text[:12000]}\n\n"
+                f"Дельта:\n{json.dumps(changes, ensure_ascii=False)[:8000]}"
+            ),
+        )
+    except Exception:
+        logger.exception("LLM second-look дельты недоступен")
+        return []
+
+    if data.get("ok"):
+        return []
+    return [
+        FlagDraft(
+            gate_number=1,
+            flag_type="llm_second_look_failed",
+            flag_details={"issues": data.get("issues") or []},
+        )
+    ]
 
 
 def run_delta_gate(
@@ -118,5 +162,9 @@ def run_delta_gate(
                     },
                 )
             )
+
+    # LLM second-look только если механика прошла (§9: сначала механика)
+    if not flags:
+        flags.extend(_llm_second_look(source_text, changes))
 
     return DeltaGateResult(passed=len(flags) == 0, flags=flags)

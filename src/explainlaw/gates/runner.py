@@ -115,6 +115,8 @@ class GateRunner:
                     NpaDocument.name.ilike("%внесении изменений%"),
                 )
             )
+            stmt = stmt.where(~NpaDocument.name.ilike("%О ратификации%"))
+            stmt = stmt.where(~NpaDocument.name.ilike("%О принятии Протокола%"))
         if limit:
             stmt = stmt.limit(limit)
         return list(self._session.execute(stmt).scalars().unique().all())

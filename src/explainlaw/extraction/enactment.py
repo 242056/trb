@@ -38,8 +38,13 @@ _ARTICLE_DATE_RE = re.compile(
 )
 
 
-def _parse_ru_date(day: str, month_name: str, year: str) -> date:
-    return date(int(year), _MONTHS[month_name.lower()], int(day))
+def _parse_ru_date(day: str, month_name: str, year: str) -> date | None:
+    """OCR часто даёт «31 февраля» — пропускаем, не валим документ."""
+    try:
+        month = _MONTHS[month_name.lower()]
+        return date(int(year), month, int(day))
+    except (KeyError, ValueError, TypeError):
+        return None
 
 
 def extract_enactments(text: str) -> list[EnactmentMatch]:
@@ -49,6 +54,8 @@ def extract_enactments(text: str) -> list[EnactmentMatch]:
     for match in _ARTICLE_DATE_RE.finditer(text):
         article = match.group(1)
         eff = _parse_ru_date(match.group(2), match.group(3), match.group(4))
+        if eff is None:
+            continue
         key = (eff, article)
         if key in seen:
             continue
@@ -65,7 +72,7 @@ def extract_enactments(text: str) -> list[EnactmentMatch]:
     if not results:
         for match in _DATE_RE.finditer(text):
             eff = _parse_ru_date(match.group(1), match.group(2), match.group(3))
-            if (eff, "document") in seen:
+            if eff is None or (eff, "document") in seen:
                 continue
             seen.add((eff, "document"))
             start = max(0, match.start() - 120)

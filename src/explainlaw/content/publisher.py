@@ -6,6 +6,7 @@ import json
 import logging
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
+from pathlib import Path
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -30,6 +31,7 @@ class PublishStats:
     fallback_post_id: int | None = None
     reserve_ready_count: int = 0
     published_count: int = 0
+    export_path: str | None = None
     dry_run: bool = False
 
     def to_dict(self) -> dict:
@@ -43,6 +45,7 @@ class PublishStats:
             "fallback_post_id": self.fallback_post_id,
             "reserve_ready_count": self.reserve_ready_count,
             "published_count": self.published_count,
+            "export_path": self.export_path,
             "dry_run": self.dry_run,
         }
 
@@ -108,6 +111,8 @@ class WeeklyPublisher:
 
         if mark_published:
             stats.published_count = self._mark_ready_as_published(limit=1)
+            if stats.published_count:
+                stats.export_path = self._export_published(limit=1)
 
         self._session.commit()
         return stats
@@ -131,6 +136,38 @@ class WeeklyPublisher:
             post.status = PostStatus.published
             post.published_at = now
         return len(posts)
+
+    def _export_published(self, *, limit: int = 1) -> str | None:
+        """Экспорт опубликованных постов в PUBLISH_EXPORT_DIR для ручной выкладки."""
+        posts = self._session.execute(
+            select(PostBank)
+            .where(PostBank.status == PostStatus.published)
+            .order_by(PostBank.published_at.desc())
+            .limit(limit)
+        ).scalars().all()
+        if not posts:
+            return None
+
+        out_dir = Path(settings.publish_export_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        last_path: str | None = None
+        for post in posts:
+            stamp = (post.published_at or datetime.now(timezone.utc)).strftime("%Y%m%d_%H%M%S")
+            path = out_dir / f"post_{post.id}_{stamp}.md"
+            body = f"# {post.title}\n\n{post.content}\n"
+            path.write_text(body, encoding="utf-8")
+            meta = {
+                "post_id": post.id,
+                "post_type": post.post_type.value,
+                "title": post.title,
+                "published_at": post.published_at.isoformat() if post.published_at else None,
+            }
+            path.with_suffix(".json").write_text(
+                json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+            last_path = str(path)
+            logger.info("Экспорт публикации: %s", path)
+        return last_path
 
     def _publish_kafka(self, post_id: int, post_type: str) -> None:
         if self._kafka is None:

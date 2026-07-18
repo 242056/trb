@@ -25,6 +25,8 @@ def build_digest_content(cards: list[ScoredCard], *, week_label: str) -> str:
         title = (doc.name or doc.eo_number)[:120]
         lines.append(f"{idx}. №{num} — {title}")
         lines.append(card.card.content.strip())
+        if doc.source_url:
+            lines.append(f"Источник: {doc.source_url}")
         lines.append("")
     return "\n".join(lines).strip()
 
@@ -97,8 +99,9 @@ def build_enactment_week_post(session: Session, *, today: date | None = None) ->
         title = (doc.name or doc.eo_number)[:100]
         article = (enactment.unit_address or {}).get("статья")
         article_part = f", ст. {article}" if article else ""
+        src = f" — {doc.source_url}" if doc.source_url else ""
         lines.append(
-            f"• {enactment.effective_date.strftime('%d.%m.%Y')}: №{num}{article_part} — {title}"
+            f"• {enactment.effective_date.strftime('%d.%m.%Y')}: №{num}{article_part} — {title}{src}"
         )
 
     post = PostBank(

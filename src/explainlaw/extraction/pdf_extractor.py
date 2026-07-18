@@ -6,6 +6,7 @@ import fitz
 
 from explainlaw.config import settings
 from explainlaw.db.models import TextExtractionMethod
+from explainlaw.extraction.ocr_engines import get_ocr_engine
 
 logger = logging.getLogger(__name__)
 
@@ -29,23 +30,45 @@ def extract_text_from_pdf(pdf_bytes: bytes) -> ExtractionResult:
         pages = [page.get_text("text") for page in doc]
         text = _normalize_text("\n".join(pages))
         if len(text) >= settings.ocr_text_threshold:
-            return ExtractionResult(text=text, method=TextExtractionMethod.pdf_text, page_count=len(pages))
+            return ExtractionResult(
+                text=text, method=TextExtractionMethod.pdf_text, page_count=len(pages)
+            )
 
         if not settings.ocr_enabled:
-            logger.debug("OCR отключён (OCR_ENABLED=false), используем извлечённый текст PDF")
-            return ExtractionResult(text=text, method=TextExtractionMethod.pdf_text, page_count=len(pages))
+            logger.debug("OCR отключён (OCR_ENABLED=false)")
+            return ExtractionResult(
+                text=text, method=TextExtractionMethod.pdf_text, page_count=len(pages)
+            )
 
-        ocr_text = _ocr_with_fitz(doc)
+        ocr_text = _ocr_pdf_pages(doc)
         if not ocr_text or len(ocr_text) < settings.ocr_text_threshold:
-            ocr_text = _ocr_fallback(pdf_bytes)
+            ocr_text = _ocr_with_fitz(doc)
 
         if ocr_text and len(ocr_text) > len(text):
             return ExtractionResult(
                 text=ocr_text, method=TextExtractionMethod.ocr, page_count=len(pages)
             )
-        return ExtractionResult(text=text, method=TextExtractionMethod.pdf_text, page_count=len(pages))
+        return ExtractionResult(
+            text=text, method=TextExtractionMethod.pdf_text, page_count=len(pages)
+        )
     finally:
         doc.close()
+
+
+def _ocr_pdf_pages(doc: fitz.Document) -> str | None:
+    engine = get_ocr_engine()
+    if engine is None:
+        logger.warning("Нет доступного OCR-движка (paddle/tesseract/yandex)")
+        return None
+    chunks: list[str] = []
+    try:
+        for page in doc:
+            pix = page.get_pixmap(dpi=200)
+            chunks.append(engine.image_to_text(pix.tobytes("jpeg")))
+        return _normalize_text("\n\n".join(chunks))
+    except Exception:
+        logger.exception("OCR (%s) не удался", engine.name)
+        return None
 
 
 def _ocr_with_fitz(doc: fitz.Document) -> str | None:
@@ -57,21 +80,4 @@ def _ocr_with_fitz(doc: fitz.Document) -> str | None:
         return _normalize_text("\n".join(chunks))
     except Exception:
         logger.debug("PyMuPDF OCR недоступен", exc_info=True)
-        return None
-
-
-def _ocr_fallback(pdf_bytes: bytes) -> str | None:
-    try:
-        from pdf2image import convert_from_bytes
-        import pytesseract
-    except ImportError:
-        logger.debug("OCR-зависимости не установлены (pip install explainlaw[ocr])")
-        return None
-
-    try:
-        images = convert_from_bytes(pdf_bytes, dpi=200)
-        chunks = [pytesseract.image_to_string(img, lang="rus") for img in images]
-        return _normalize_text("\n\n".join(chunks))
-    except Exception:
-        logger.exception("OCR не удался")
         return None

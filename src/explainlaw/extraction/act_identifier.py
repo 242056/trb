@@ -54,9 +54,20 @@ _FZ_DOT_DATE_RE = re.compile(
 )
 
 
-def _parse_ru_date(day: str, month_name: str, year: str) -> str:
-    month = _MONTHS[month_name.lower()]
-    return date(int(year), month, int(day)).isoformat()
+def _parse_ru_date(day: str, month_name: str, year: str) -> str | None:
+    """OCR может дать невалидный день месяца — пропускаем дату, не валим разбор."""
+    try:
+        month = _MONTHS[month_name.lower()]
+        return date(int(year), month, int(day)).isoformat()
+    except (KeyError, ValueError, TypeError):
+        return None
+
+
+def _parse_dot_date(day: str, month: str, year: str) -> str | None:
+    try:
+        return date(int(year), int(month), int(day)).isoformat()
+    except ValueError:
+        return None
 
 
 def _normalize_number(raw: str | None) -> str | None:
@@ -90,7 +101,9 @@ def parse_federal_law_references(text: str) -> list[dict[str, Any]]:
             "name": match.group(5).strip(),
         }
         if match.group(1) and match.group(2) and match.group(3):
-            identifier["date"] = _parse_ru_date(match.group(1), match.group(2), match.group(3))
+            parsed = _parse_ru_date(match.group(1), match.group(2), match.group(3))
+            if parsed:
+                identifier["date"] = parsed
         number = _normalize_number(match.group(4))
         if number:
             identifier["number"] = number
@@ -104,7 +117,9 @@ def parse_federal_law_references(text: str) -> list[dict[str, Any]]:
             "name": match.group(1).strip(),
         }
         if match.group(2) and match.group(3) and match.group(4):
-            identifier["date"] = _parse_ru_date(match.group(2), match.group(3), match.group(4))
+            parsed = _parse_ru_date(match.group(2), match.group(3), match.group(4))
+            if parsed:
+                identifier["date"] = parsed
         number = _normalize_number(match.group(5) if match.lastindex and match.lastindex >= 5 else None)
         if number:
             identifier["number"] = number
@@ -115,10 +130,10 @@ def parse_federal_law_references(text: str) -> list[dict[str, Any]]:
             "type": "federal_law",
             "name": match.group(1).strip(),
         }
-        if match.group(2):
-            identifier["date"] = (
-                f"{match.group(4)}-{int(match.group(3)):02d}-{int(match.group(2)):02d}"
-            )
+        if match.group(2) and match.group(3) and match.group(4):
+            parsed = _parse_dot_date(match.group(2), match.group(3), match.group(4))
+            if parsed:
+                identifier["date"] = parsed
         if not identifier.get("date"):
             continue
         add(identifier)

@@ -90,6 +90,8 @@ class DocumentProcessor:
         force: bool = False,
         amendments_only: bool = False,
         rebuild_deltas_only: bool = False,
+        resume: bool = False,
+        min_text_chars: int = 200,
     ) -> None:
         self._session = session
         self._storage = storage
@@ -97,6 +99,8 @@ class DocumentProcessor:
         self._force = force
         self._amendments_only = amendments_only
         self._rebuild_deltas_only = rebuild_deltas_only
+        self._resume = resume
+        self._min_text_chars = min_text_chars
 
     def process(self, *, limit: int | None = None) -> ProcessStats:
         stats = ProcessStats()
@@ -169,7 +173,7 @@ class DocumentProcessor:
                 select(NpaDocument)
                 .options(*load_options)
                 .join(NpaText, NpaText.document_id == NpaDocument.id)
-                .order_by(NpaDocument.publish_date_short.desc())
+                .order_by(NpaDocument.publish_date_short.asc(), NpaDocument.id.asc())
             )
             if self._amendments_only:
                 stmt = stmt.where(
@@ -178,9 +182,16 @@ class DocumentProcessor:
                         NpaDocument.name.ilike("%внесении изменений%"),
                     )
                 )
+                stmt = stmt.where(~NpaDocument.name.ilike("%О ратификации%"))
+                stmt = stmt.where(~NpaDocument.name.ilike("%О принятии Протокола%"))
+            if self._resume:
+                # --resume: только поправки без дельты
+                stmt = stmt.outerjoin(NpaDelta, NpaDelta.document_id == NpaDocument.id).where(
+                    NpaDelta.id.is_(None)
+                )
             if limit:
                 stmt = stmt.limit(limit)
-            return list(self._session.execute(stmt).scalars().all())
+            return list(self._session.execute(stmt).scalars().unique().all())
 
         has_summary = exists().where(NpaSummary.document_id == NpaDocument.id)
         has_pending_gate = exists().where(
@@ -235,6 +246,10 @@ class DocumentProcessor:
             text_row = doc.text
 
         full_text = text_row.full_text
+        if self._rebuild_deltas_only and len((full_text or "").strip()) < self._min_text_chars:
+            raise ValueError(
+                f"текст слишком короткий для дельты ({len((full_text or '').strip())} < {self._min_text_chars})"
+            )
         fragment = extract_summary_fragment(full_text)
 
         if not doc.enactments or (self._force and not self._rebuild_deltas_only):

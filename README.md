@@ -14,8 +14,20 @@ explainlaw status
 explainlaw daily
 ```
 
+## Прод (без VPS)
+
+Целевая схема: Yandex Managed PostgreSQL + Yandex Kafka (Qwen) + MinIO.
+
+```bash
+cp .env.example .env   # заполнить Yandex / MinIO / Gateway / алерты
+./scripts/install-cron.sh --prod
+```
+
+Подробно: [YANDEX_PROD.md](YANDEX_PROD.md).
+
 ## Документация
 
+- [YANDEX_PROD.md](YANDEX_PROD.md) — прод на Yandex Cloud, cron, TIFF-ZIP, OCR
 - [PROD_HANDOFF.md](PROD_HANDOFF.md) — передача на прод, перенос БД и MinIO
 - [rule.md](rule.md) — техническое задание
 

@@ -184,17 +184,30 @@ class DailyCollector:
         doc = self._repo.create_document(item, source_url=source_url, raw_api=raw_api)
 
         try:
-            pdf_data = self._pravo.download_pdf(item.eo_number)
+            raw_data, kind = self._pravo.download_raw_file(item.eo_number)
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code == 404:
                 logger.warning("PDF не найден на портале для %s", item.eo_number)
                 return False
             raise
         except ValueError as exc:
-            if "не похож на PDF" in str(exc):
-                logger.warning("PDF недоступен для %s: %s", item.eo_number, exc)
-                return False
-            raise
+            logger.warning("Файл недоступен для %s: %s", item.eo_number, exc)
+            return False
+
+        if kind == "tiff_zip":
+            self._repo.add_raw_file(
+                doc,
+                raw_type=RawFileType.zip,
+                data=raw_data,
+                bucket=settings.minio_bucket_raw,
+                object_name=f"{item.eo_number}.tiff.zip",
+                content_type="application/zip",
+            )
+            from explainlaw.extraction.tiff_zip import tiff_zip_to_pdf
+
+            pdf_data = tiff_zip_to_pdf(raw_data)
+        else:
+            pdf_data = raw_data
 
         pdf_raw = self._repo.add_raw_file(
             doc,
@@ -218,6 +231,7 @@ class DailyCollector:
         except Exception:
             logger.warning("Не удалось сохранить снимок страницы для %s", item.eo_number)
 
+        self._store_optional_raw(doc, item)
         self._session.flush()
         self._publish_kafka(TOPIC_DOCUMENT_DISCOVERED, {"eo_number": item.eo_number, "document_id": doc.id})
         self._publish_kafka(
@@ -226,8 +240,105 @@ class DailyCollector:
         )
         return True
 
+    def _store_optional_raw(self, doc, item: PravoDocumentItem) -> None:
+        if item.zip_file_length and item.zip_file_length > 0:
+            try:
+                zip_data = self._pravo.download_zip(item.eo_number)
+                self._repo.add_raw_file(
+                    doc,
+                    raw_type=RawFileType.zip,
+                    data=zip_data,
+                    bucket=settings.minio_bucket_raw,
+                    object_name=f"{item.eo_number}.zip",
+                    content_type="application/zip",
+                )
+            except Exception:
+                logger.warning("ZIP недоступен для %s", item.eo_number)
+        if item.has_svg:
+            try:
+                svg_data = self._pravo.download_svg(item.eo_number)
+                self._repo.add_raw_file(
+                    doc,
+                    raw_type=RawFileType.svg,
+                    data=svg_data,
+                    bucket=settings.minio_bucket_raw,
+                    object_name=f"{item.eo_number}.svg",
+                    content_type="image/svg+xml",
+                )
+            except Exception:
+                logger.warning("SVG недоступен для %s", item.eo_number)
+
+    def backfill_missing_pdfs(self, *, limit: int | None = None) -> dict:
+        """Догон PDF/TIFF-ZIP для документов без сырья (§4.1)."""
+        from sqlalchemy import exists, select
+
+        from explainlaw.db.models import NpaDocument, NpaRaw
+        from explainlaw.extraction.tiff_zip import tiff_zip_to_pdf
+
+        has_pdf = exists().where(
+            NpaRaw.document_id == NpaDocument.id,
+            NpaRaw.raw_type == RawFileType.pdf,
+        )
+        stmt = (
+            select(NpaDocument)
+            .where(~has_pdf)
+            .order_by(NpaDocument.publish_date_short.desc())
+        )
+        if limit:
+            stmt = stmt.limit(limit)
+        docs = list(self._session.execute(stmt).scalars().all())
+        stats = {"candidates": len(docs), "fetched": 0, "not_found": 0, "errors": 0}
+        for doc in docs:
+            try:
+                raw_data, kind = self._pravo.download_raw_file(doc.eo_number)
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code == 404:
+                    stats["not_found"] += 1
+                    continue
+                stats["errors"] += 1
+                continue
+            except ValueError:
+                stats["not_found"] += 1
+                continue
+            except Exception:
+                stats["errors"] += 1
+                logger.exception("PDF backfill failed %s", doc.eo_number)
+                continue
+
+            if kind == "tiff_zip":
+                self._repo.add_raw_file(
+                    doc,
+                    raw_type=RawFileType.zip,
+                    data=raw_data,
+                    bucket=settings.minio_bucket_raw,
+                    object_name=f"{doc.eo_number}.tiff.zip",
+                    content_type="application/zip",
+                )
+                try:
+                    pdf_data = tiff_zip_to_pdf(raw_data)
+                except Exception:
+                    stats["errors"] += 1
+                    continue
+            else:
+                pdf_data = raw_data
+
+            self._repo.add_raw_file(
+                doc,
+                raw_type=RawFileType.pdf,
+                data=pdf_data,
+                bucket=settings.minio_bucket_raw,
+                object_name=f"{doc.eo_number}.pdf",
+                content_type="application/pdf",
+            )
+            stats["fetched"] += 1
+            self._session.commit()
+        return stats
+
     def _publish_kafka(self, topic: str, payload: dict) -> None:
         if self._kafka is None:
             return
-        self._kafka.produce(topic, json.dumps(payload).encode())
-        self._kafka.poll(0)
+        try:
+            self._kafka.produce(topic, json.dumps(payload).encode())
+            self._kafka.poll(0)
+        except Exception:
+            logger.warning("Не удалось опубликовать событие %s", topic, exc_info=True)
