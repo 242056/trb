@@ -127,23 +127,12 @@ def send_alert_webhook(health: dict[str, Any]) -> bool:
 def send_telegram_alert(health: dict[str, Any]) -> bool:
     if health.get("healthy"):
         return False
-    token = settings.telegram_bot_token
-    chat_id = settings.telegram_chat_id
-    if not token or not chat_id:
-        return False
+    from explainlaw.messaging.telegram import format_alert_for_telegram, send_telegram_text
 
-    text = "ExplainLaw: " + "; ".join(a["message"] for a in health.get("alerts", []))
-    try:
-        response = httpx.post(
-            f"https://api.telegram.org/bot{token}/sendMessage",
-            json={"chat_id": chat_id, "text": text[:4000]},
-            timeout=10.0,
-        )
-        response.raise_for_status()
-        return True
-    except Exception:
-        logger.exception("Не удалось отправить Telegram-алерт")
+    messages = [a["message"] for a in health.get("alerts", [])]
+    if not messages:
         return False
+    return send_telegram_text(format_alert_for_telegram(messages))
 
 
 def send_alerts(health: dict[str, Any]) -> bool:

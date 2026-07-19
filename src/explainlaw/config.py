@@ -75,6 +75,8 @@ class Settings(BaseSettings):
     alert_log_path: str = "logs/alerts.jsonl"
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
+    # Слать дайджест в Telegram при publish --mark-published / weekly
+    telegram_publish: bool = True
 
     # LLM second-look / semantic gate (§9) — только после механики
     gate_llm_verify: bool = True

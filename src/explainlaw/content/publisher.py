@@ -32,6 +32,7 @@ class PublishStats:
     reserve_ready_count: int = 0
     published_count: int = 0
     export_path: str | None = None
+    telegram_sent: bool = False
     dry_run: bool = False
 
     def to_dict(self) -> dict:
@@ -46,6 +47,7 @@ class PublishStats:
             "reserve_ready_count": self.reserve_ready_count,
             "published_count": self.published_count,
             "export_path": self.export_path,
+            "telegram_sent": self.telegram_sent,
             "dry_run": self.dry_run,
         }
 
@@ -113,6 +115,7 @@ class WeeklyPublisher:
             stats.published_count = self._mark_ready_as_published(limit=1)
             if stats.published_count:
                 stats.export_path = self._export_published(limit=1)
+                stats.telegram_sent = self._send_published_to_telegram(limit=1)
 
         self._session.commit()
         return stats
@@ -168,6 +171,27 @@ class WeeklyPublisher:
             last_path = str(path)
             logger.info("Экспорт публикации: %s", path)
         return last_path
+
+    def _send_published_to_telegram(self, *, limit: int = 1) -> bool:
+        if not settings.telegram_publish:
+            return False
+        from explainlaw.messaging.telegram import format_post_for_telegram, send_telegram_text
+
+        posts = self._session.execute(
+            select(PostBank)
+            .where(PostBank.status == PostStatus.published)
+            .order_by(PostBank.published_at.desc())
+            .limit(limit)
+        ).scalars().all()
+        sent = False
+        for post in posts:
+            text = format_post_for_telegram(title=post.title, content=post.content)
+            if send_telegram_text(text):
+                sent = True
+                logger.info("Дайджест отправлен в Telegram (post_id=%s)", post.id)
+            else:
+                logger.warning("Не удалось отправить post_id=%s в Telegram", post.id)
+        return sent
 
     def _publish_kafka(self, post_id: int, post_type: str) -> None:
         if self._kafka is None:
