@@ -1,103 +1,219 @@
-# ExplainLaw — прод на Yandex Cloud (без VPS)
+# ExplainLaw — инструкция для прода (Yandex)
 
-VPS больше не используется. Прод-целевая схема: **Yandex Managed PostgreSQL + Yandex Managed Kafka (Qwen) + MinIO** (отдельный хост/Object Storage).
+Репозиторий: https://github.com/explain-law/regulatory-legal-acts  
+ТЗ: `rule.md`. Локальная отладка с Docker — в конце документа.
 
-## 0. Docker на проде
+---
 
-`docker compose up` **ничего не поднимает** — Postgres/MinIO/Kafka вынесены в profile `local`.
+## 1. Архитектура на проде
 
-Локальная отладка: `docker compose --profile local up -d`.  
-Прод: только `.env` + cron (`daily_prod.sh`), без compose.
+| Компонент | Где | Docker? |
+|-----------|-----|---------|
+| Код / cron / CLI `explainlaw` | Хост (Python 3.11+) | **Нет** |
+| PostgreSQL | Yandex Managed PG | Нет |
+| Kafka (Qwen) | Yandex Managed Kafka | Нет |
+| PDF / сырьё | Yandex Object Storage, бакет `explain-npa` | Нет |
+| Qwen worker | Отдельный сервер, топики `llm.requests` → `llm.responses` | Нет |
+| Gateway (опц.) | Облачный OpenAI-совместимый API | Нет |
+| Telegram | Бот в группе: алерты + еженедельный дайджест | Нет |
 
-## 1. Инфраструктура
+`docker compose up` на проде **ничего не делает** (`no service selected`).  
+Postgres/MinIO/Kafka в compose только за profile `local` (для ноутбука).
 
-| Компонент | Куда |
-|-----------|------|
-| PostgreSQL | Yandex Managed PG (`DATABASE_URL`, `DATABASE_SSLMODE=require`) |
-| Kafka | Yandex Managed Kafka SASL_SSL (`KAFKA_*`, `LLM_TRANSPORT=kafka`) |
-| Сырьё PDF | Yandex Object Storage (`AWS_*` → бакет `explain-npa`) или MinIO |
-| Qwen worker | Подписчик `llm.requests` → `llm.responses` |
-| Gateway | Облачный OpenAI-совместимый API для публичных сводок |
-| Cron | Любой хост с Python 3.11+ и доступом к PG/Kafka/MinIO |
+---
 
-Миграции: `alembic upgrade head` (или `python scripts/init_infra.py` если Kafka/MinIO доступны).
-
-## 2. Конфиг
+## 2. Первый запуск на сервере
 
 ```bash
+git clone https://github.com/explain-law/regulatory-legal-acts.git
+cd regulatory-legal-acts
+git checkout main   # или актуальная ветка
+
+python3.11 -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev,ocr]"
+# если нужен PaddleOCR:
+# pip install -e ".[paddle]"
+
 cp .env.example .env
-# заполнить Yandex PG, Kafka, MinIO, Gateway, алерты
-pip install -e ".[dev,ocr]"   # + paddle при необходимости: pip install -e ".[paddle]"
+# заполнить .env — см. §3
+
+# миграции (только PG; Kafka/S3 уже в облаке)
+alembic upgrade head
+
+explainlaw status
+explainlaw health
 ```
 
-Ключевые переменные:
-
-- Object Storage (прод):
-  ```bash
-  AWS_ENDPOINT_URL=https://storage.yandexcloud.net
-  AWS_KEY_ID=...
-  AWS_SECRET_KEY=...
-  AWS_BUCKET=explain-npa
-  ```
-  Один бакет на PDF/ZIP и HTML-снимки. Сейчас бакет пустой — PDF появятся после `collect` / `backfill-pdfs` или заливки `minio_data.tar.gz`.
-- `LLM_TRANSPORT=kafka` + `KAFKA_PIPELINE_EVENTS=false` — если ACL только на `llm.*`
-- `OCR_ENGINE=paddle|tesseract|yandex` — публичного SberOCR API **нет**
-- `TELEGRAM_*` / `ALERT_WEBHOOK_URL` / `ALERT_LOG_PATH` — алерты §11
-- `PUBLISH_EXPORT_DIR=logs/published` — экспорт еженедельного дайджеста
-
-## 3. Cron (прод)
+Cron:
 
 ```bash
 chmod +x scripts/*_prod.sh scripts/backup_minio.sh scripts/install-cron.sh
 ./scripts/install-cron.sh --prod
-# или посмотреть: ./scripts/install-cron.sh --prod --print
+# посмотреть без установки: ./scripts/install-cron.sh --prod --print
 ```
 
-Расписание:
+---
 
-- ежедневно 08:00 — `daily_prod.sh`
-- понедельник 09:00 — `daily_prod.sh --weekly-publish` (дайджест + mark published + export)
-- воскресенье 03:00 — `backfill_prod.sh` (PDF/TIFF + deltas --resume)
-- каждые 6 ч — `health_prod.sh --alert`
-- воскресенье 02:00 — `backup_minio.sh`
+## 3. `.env` (прод)
 
-## 4. TIFF-ZIP (старые акты ~2011–2012)
-
-`/File/pdf/{eo}` иногда отдаёт ZIP с TIFF, не PDF. Конвейер:
-
-1. `download_raw_file` → детект `tiff_zip`
-2. сохранение ZIP в MinIO
-3. `tiff_zip_to_pdf` (компактный JPEG, max width 1600)
-4. сохранение PDF и обычный OCR/текст
-
-Догон: `explainlaw backfill-pdfs --limit 200`
-
-## 5. Команды догона
+Минимум:
 
 ```bash
-explainlaw backfill-pdfs --limit 200
-RUN_OCR=1 ./scripts/backfill_prod.sh          # OCR + deltas
-explainlaw rebuild-deltas --resume --limit 500
-explainlaw refresh-summaries --limit 50
-explainlaw gate --amendments-only --limit 100
-explainlaw publish --mark-published
-explainlaw health --alert
-explainlaw status
+# PostgreSQL (Yandex)
+DATABASE_URL=postgresql+psycopg://USER:PASS@HOST:6432/DB
+DATABASE_SSLMODE=require
+
+# Object Storage (Yandex S3)
+AWS_ENDPOINT_URL=https://storage.yandexcloud.net
+AWS_KEY_ID=...
+AWS_SECRET_KEY=...
+AWS_BUCKET=explain-npa
+
+# Kafka (Yandex) + Qwen
+KAFKA_BOOTSTRAP_SERVERS=rc1a-....mdb.yandexcloud.net:9091
+KAFKA_USERNAME=llm
+KAFKA_PASSWORD=...
+KAFKA_SECURITY_PROTOCOL=SASL_SSL
+KAFKA_SASL_MECHANISM=SCRAM-SHA-512
+KAFKA_SSL_CA_LOCATION=/path/to/YandexInternalRootCA.crt
+KAFKA_ENABLED=true
+KAFKA_PIPELINE_EVENTS=false
+LLM_TRANSPORT=kafka
+KAFKA_LLM_REQUESTS_TOPIC=llm.requests
+KAFKA_LLM_RESPONSES_TOPIC=llm.responses
+KAFKA_LLM_GROUP_ID=explainlaw-llm
+QWEN_MODEL=qwen3:8b
+
+# OCR для НОВЫХ сканов (старые с текстом в БД не переOCR’ятся в обычном process)
+OCR_ENABLED=true
+OCR_ENGINE=paddle
+OCR_TEXT_THRESHOLD=200
+
+# Telegram
+TELEGRAM_BOT_TOKEN=...
+TELEGRAM_CHAT_ID=-...
+TELEGRAM_PUBLISH=true
+
+# Опционально: публичные сводки
+# GATEWAY_API_BASE=...
+# GATEWAY_API_KEY=...
+# GATEWAY_MODEL=gpt-4o-mini
+
+COLLECT_SILENT_ALERT_HOURS=36
+PUBLISH_EXPORT_DIR=logs/published
+ALERT_LOG_PATH=logs/alerts.jsonl
 ```
 
-## 6. Критерии готовности (§11) — чеклист
+Секреты в git **не** класть. Образец полей: `.env.example`.
 
-- [ ] Ежедневный `collect` пишет в Yandex PG, сырьё в MinIO
-- [ ] PDF/OCR (включая TIFF-ZIP) работает
-- [ ] Дельты + `missing_acts_queue` наполняются через Qwen/Kafka
-- [ ] Оба гейта (механика + LLM verify) → `post_bank`
-- [ ] Еженедельный дайджест с `source_url`, экспорт в `logs/published`
-- [ ] Алерты на тихий сбор (webhook/Telegram/jsonl)
-- [ ] Backup MinIO по cron
-- [ ] Домашний сервер Qwen — **не** единственное хранилище данных
+---
 
-## 7. Что нельзя забыть
+## 4. Что уже развёрнуто (состояние на момент передачи)
 
-1. Пересоздать/перенести MinIO — старый VPS мёртв, PDF нужно либо восстановить из бэкапа, либо `collect --all` + `backfill-pdfs`.
-2. CA-сертификат Yandex для Kafka/PG (`KAFKA_SSL_CA_LOCATION`, sslmode).
-3. Gateway ключи для публичных сводок; без них — механический/Qwen fallback.
+- Yandex PG: каталог ФЗ, тексты, дельты, post_bank  
+- S3 `explain-npa`: ~7590 PDF; пути в `npa_raw` вида `explain-npa/{eo}.pdf`  
+- ~171 документов без PDF в S3 (на портале часто нет файла) — не блокер  
+- Расшифровка норм: **Qwen3 8B** через Kafka  
+- OCR по умолчанию в старых `.env` мог быть `false` — для новых сканов включить `true`
+
+---
+
+## 5. Ежедневная / недельная работа
+
+| Когда | Скрипт | Что делает |
+|-------|--------|------------|
+| Каждый день 08:00 | `scripts/daily_prod.sh` | collect → process → gate → fetch-missing → health |
+| Понедельник 09:00 | `scripts/daily_prod.sh --weekly-publish` | то же + дайджест, export в `logs/published`, **пост в Telegram** |
+| Вс 03:00 | `scripts/backfill_prod.sh` | догон PDF / deltas `--resume` |
+| Каждые 6 ч | `scripts/health_prod.sh` | health + алерты в TG при проблемах |
+| Вс 02:00 | `scripts/backup_minio.sh` | бэкап бакета Object Storage |
+
+Ручные команды:
+
+```bash
+explainlaw status
+explainlaw health --alert
+explainlaw daily
+explainlaw daily --weekly-publish
+explainlaw publish --mark-published          # дайджест в файл + Telegram
+explainlaw collect --days 3
+explainlaw process --limit 50
+explainlaw rebuild-deltas --resume --limit 200
+explainlaw backfill-pdfs --limit 100
+```
+
+### Telegram: формат дайджеста
+
+```
+Дайджест ФЗ (дд.мм–дд.мм.гггг)
+
+1. №…-ФЗ — название
+Текст карточки…
+🔗 Источник   ← ссылка на pravo.gov.ru
+```
+
+Нужно: бот добавлен в группу и может писать.  
+Алерты: `⚠️ ExplainLaw` + текст проблемы (тихий сбор и т.п.).
+
+---
+
+## 6. OCR — кратко
+
+| Ситуация | Поведение |
+|----------|-----------|
+| `OCR_ENABLED=false` | Новые сканы без текстового слоя → плохой/пустой текст |
+| `OCR_ENABLED=true` | OCR только если в PDF мало текста; уже заполненный `npa_text` в обычном process **не** трогается |
+| Движок | `OCR_ENGINE=paddle` (запас: `tesseract`, `yandex`) |
+
+Массовый догон OCR: `RUN_OCR=1 ./scripts/backfill_prod.sh` или `python scripts/ocr_backfill.py`.
+
+---
+
+## 7. LLM / модели
+
+| Задача | Модель | Как |
+|--------|--------|-----|
+| Дельты / norm events («расшифровка») | Qwen3 8B | Kafka `llm.requests` / `llm.responses` |
+| Публичная сводка | Gateway (если задан) иначе Qwen/механический fallback | HTTP |
+| Гейт №2 semantic | Gateway → иначе Qwen | после механики |
+
+Без живого Qwen-worker дельты строятся regex-fallback’ом (хуже полнота).
+
+---
+
+## 8. Чеклист «прод жив»
+
+- [ ] `.env` на хосте, `explainlaw status` отвечает  
+- [ ] `docker compose up` → `no service selected` (ожидаемо)  
+- [ ] Cron `--prod` установлен (`crontab -l`)  
+- [ ] `OCR_ENABLED=true` (для новых сканов)  
+- [ ] Qwen-worker слушает Kafka  
+- [ ] Бот в Telegram-группе, `publish --mark-published` или weekly отрабатывает  
+- [ ] CA для Kafka лежит по `KAFKA_SSL_CA_LOCATION`  
+- [ ] Gateway (по желанию) для «лица» сводок  
+
+---
+
+## 9. Локальная разработка (не прод)
+
+```bash
+cp .env.example .env          # localhost Postgres/MinIO/Kafka
+docker compose --profile local up -d
+pip install -e ".[dev]"
+python scripts/init_infra.py
+explainlaw daily
+```
+
+---
+
+## 10. Связанные файлы
+
+| Файл | Назначение |
+|------|------------|
+| `YANDEX_PROD.md` | этот runbook |
+| `.env.example` | шаблон переменных |
+| `scripts/daily_prod.sh` | дневной cron без Docker |
+| `scripts/install-cron.sh --prod` | установка crontab |
+| `PROD_HANDOFF.md` | исторический handoff / перенос данных |
+| `rule.md` | ТЗ |

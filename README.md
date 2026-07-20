@@ -2,11 +2,12 @@
 
 Ежедневный сбор ФЗ с [publication.pravo.gov.ru](http://publication.pravo.gov.ru), извлечение текста, дельты изменений, гейты качества, еженедельная публикация.
 
-## Быстрый старт
+**Репозиторий прода:** https://github.com/explain-law/regulatory-legal-acts
+
+## Быстрый старт (локально)
 
 ```bash
 cp .env.example .env
-# Локально (Postgres/MinIO/Kafka в Docker):
 docker compose --profile local up -d
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
@@ -15,24 +16,28 @@ explainlaw status
 explainlaw daily
 ```
 
-На проде с Yandex PG/Kafka/Object Storage compose **не нужен** — только `.env` и `./scripts/install-cron.sh --prod`.  
-`docker compose up` без `--profile local` ничего не поднимет (образы не качает).
+`docker compose up` без `--profile local` → `no service selected` (на проде так и должно быть).
 
-## Прод (без локального Docker)
+## Прод
 
-Целевая схема: Yandex Managed PostgreSQL + Yandex Kafka (Qwen) + Object Storage.
+Полная инструкция: **[YANDEX_PROD.md](YANDEX_PROD.md)**  
+(Yandex PG + Kafka + Object Storage, cron, OCR, Telegram, без Docker.)
 
 ```bash
-cp .env.example .env   # заполнить Yandex / AWS_* / Gateway / алерты
+cp .env.example .env    # заполнить секреты
+pip install -e ".[dev,ocr]"
+alembic upgrade head
 ./scripts/install-cron.sh --prod
 ```
 
-Подробно: [YANDEX_PROD.md](YANDEX_PROD.md).
+## Документация
 
-- [YANDEX_PROD.md](YANDEX_PROD.md) — прод на Yandex Cloud, cron, TIFF-ZIP, OCR
-- [PROD_HANDOFF.md](PROD_HANDOFF.md) — передача на прод, перенос БД и MinIO
-- [rule.md](rule.md) — техническое задание
+| Файл | О чём |
+|------|--------|
+| [YANDEX_PROD.md](YANDEX_PROD.md) | **Прод-runbook** (актуальный) |
+| [PROD_HANDOFF.md](PROD_HANDOFF.md) | Историческая передача / перенос данных |
+| [rule.md](rule.md) | Техническое задание |
 
 ## Данные не в git
 
-Бэкапы БД (`.dump`, `.sql`) и `minio_data.tar.gz` передаются отдельно — см. PROD_HANDOFF.md.
+Секреты (`.env`), архивы MinIO (`*.tar.gz`) и PDF — только вне репозитория. Сырьё на проде уже в Yandex Object Storage `explain-npa`.
