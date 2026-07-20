@@ -1,219 +1,140 @@
 # ExplainLaw — инструкция для прода (Yandex)
 
 Репозиторий: https://github.com/explain-law/regulatory-legal-acts  
-ТЗ: `rule.md`. Локальная отладка с Docker — в конце документа.
+ТЗ: `rule.md`.
 
 ---
 
-## 1. Архитектура на проде
+## 1. Архитектура
 
-| Компонент | Где | Docker? |
-|-----------|-----|---------|
-| Код / cron / CLI `explainlaw` | Хост (Python 3.11+) | **Нет** |
-| PostgreSQL | Yandex Managed PG | Нет |
-| Kafka (Qwen) | Yandex Managed Kafka | Нет |
-| PDF / сырьё | Yandex Object Storage, бакет `explain-npa` | Нет |
-| Qwen worker | Отдельный сервер, топики `llm.requests` → `llm.responses` | Нет |
-| Gateway (опц.) | Облачный OpenAI-совместимый API | Нет |
-| Telegram | Бот в группе: алерты + еженедельный дайджест | Нет |
+| Компонент | Где |
+|-----------|-----|
+| **Приложение** (`app` + `cron`) | Docker на хосте |
+| PostgreSQL | Yandex Managed PG (снаружи) |
+| Kafka / Qwen | Yandex Managed Kafka (снаружи) |
+| PDF | Yandex Object Storage `explain-npa` (снаружи) |
+| Telegram | алерты + еженедельный дайджест |
 
-`docker compose up` на проде **ничего не делает** (`no service selected`).  
-Postgres/MinIO/Kafka в compose только за profile `local` (для ноутбука).
+Postgres/MinIO/Kafka **внутри Docker только для локалки** (`--profile local`). На проде их не поднимаем.
 
 ---
 
-## 2. Первый запуск на сервере
+## 2. Прод: запуск всего сервиса через Docker
 
 ```bash
 git clone https://github.com/explain-law/regulatory-legal-acts.git
 cd regulatory-legal-acts
-git checkout main   # или актуальная ветка
-
-python3.11 -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev,ocr]"
-# если нужен PaddleOCR:
-# pip install -e ".[paddle]"
+git checkout main
 
 cp .env.example .env
-# заполнить .env — см. §3
+# заполнить Yandex PG / Kafka / AWS_* / Telegram — см. §3
 
-# миграции (только PG; Kafka/S3 уже в облаке)
-alembic upgrade head
-
-explainlaw status
-explainlaw health
+sudo docker compose up -d --build
 ```
 
-Cron:
+Поднятся:
+- **app** — API на `:8000` (`explainlaw serve`)
+- **cron** — supercronic: daily / weekly / backfill / health
+
+Проверка:
 
 ```bash
-chmod +x scripts/*_prod.sh scripts/backup_minio.sh scripts/install-cron.sh
-./scripts/install-cron.sh --prod
-# посмотреть без установки: ./scripts/install-cron.sh --prod --print
+sudo docker compose ps
+curl -s http://127.0.0.1:8000/health
+sudo docker compose exec app explainlaw status
+sudo docker compose logs -f cron
 ```
+
+Миграции (один раз):
+
+```bash
+sudo docker compose exec app alembic upgrade head
+```
+
+Остановка: `sudo docker compose down` (данные Yandex не трогает).
 
 ---
 
 ## 3. `.env` (прод)
 
-Минимум:
-
 ```bash
-# PostgreSQL (Yandex)
 DATABASE_URL=postgresql+psycopg://USER:PASS@HOST:6432/DB
 DATABASE_SSLMODE=require
 
-# Object Storage (Yandex S3)
 AWS_ENDPOINT_URL=https://storage.yandexcloud.net
 AWS_KEY_ID=...
 AWS_SECRET_KEY=...
 AWS_BUCKET=explain-npa
 
-# Kafka (Yandex) + Qwen
 KAFKA_BOOTSTRAP_SERVERS=rc1a-....mdb.yandexcloud.net:9091
 KAFKA_USERNAME=llm
 KAFKA_PASSWORD=...
 KAFKA_SECURITY_PROTOCOL=SASL_SSL
 KAFKA_SASL_MECHANISM=SCRAM-SHA-512
-KAFKA_SSL_CA_LOCATION=/path/to/YandexInternalRootCA.crt
+KAFKA_SSL_CA_LOCATION=/certs/YandexCA.crt
 KAFKA_ENABLED=true
 KAFKA_PIPELINE_EVENTS=false
 LLM_TRANSPORT=kafka
-KAFKA_LLM_REQUESTS_TOPIC=llm.requests
-KAFKA_LLM_RESPONSES_TOPIC=llm.responses
-KAFKA_LLM_GROUP_ID=explainlaw-llm
 QWEN_MODEL=qwen3:8b
 
-# OCR для НОВЫХ сканов (старые с текстом в БД не переOCR’ятся в обычном process)
 OCR_ENABLED=true
-OCR_ENGINE=paddle
-OCR_TEXT_THRESHOLD=200
+OCR_ENGINE=tesseract
 
-# Telegram
 TELEGRAM_BOT_TOKEN=...
 TELEGRAM_CHAT_ID=-...
 TELEGRAM_PUBLISH=true
-
-# Опционально: публичные сводки
-# GATEWAY_API_BASE=...
-# GATEWAY_API_KEY=...
-# GATEWAY_MODEL=gpt-4o-mini
-
-COLLECT_SILENT_ALERT_HOURS=36
-PUBLISH_EXPORT_DIR=logs/published
-ALERT_LOG_PATH=logs/alerts.jsonl
 ```
 
-Секреты в git **не** класть. Образец полей: `.env.example`.
+CA Kafka: положите сертификат в `./certs` и раскомментируйте volume в `docker-compose.yml`.
 
 ---
 
-## 4. Что уже развёрнуто (состояние на момент передачи)
+## 4. Расписание (`docker/crontab`)
 
-- Yandex PG: каталог ФЗ, тексты, дельты, post_bank  
-- S3 `explain-npa`: ~7590 PDF; пути в `npa_raw` вида `explain-npa/{eo}.pdf`  
-- ~171 документов без PDF в S3 (на портале часто нет файла) — не блокер  
-- Расшифровка норм: **Qwen3 8B** через Kafka  
-- OCR по умолчанию в старых `.env` мог быть `false` — для новых сканов включить `true`
+| Когда | Команда |
+|-------|---------|
+| 08:00 ежедневно | `explainlaw daily` |
+| 09:00 пн | `explainlaw daily --weekly-publish` (+ Telegram) |
+| 03:00 вс | `rebuild-deltas --resume --limit 500` |
+| */6 ч :30 | `explainlaw health --alert` |
 
 ---
 
-## 5. Ежедневная / недельная работа
+## 5. OCR / модели
 
-| Когда | Скрипт | Что делает |
-|-------|--------|------------|
-| Каждый день 08:00 | `scripts/daily_prod.sh` | collect → process → gate → fetch-missing → health |
-| Понедельник 09:00 | `scripts/daily_prod.sh --weekly-publish` | то же + дайджест, export в `logs/published`, **пост в Telegram** |
-| Вс 03:00 | `scripts/backfill_prod.sh` | догон PDF / deltas `--resume` |
-| Каждые 6 ч | `scripts/health_prod.sh` | health + алерты в TG при проблемах |
-| Вс 02:00 | `scripts/backup_minio.sh` | бэкап бакета Object Storage |
+- OCR в образе: **tesseract** (+ rus). Старые тексты в БД при обычном process не переOCR’ятся.
+- Расшифровка норм: **Qwen3 8B** через Kafka.
+- Gateway — опционально для публичных сводок.
 
-Ручные команды:
+---
+
+## 6. Локально (инфра + app)
 
 ```bash
-explainlaw status
-explainlaw health --alert
-explainlaw daily
-explainlaw daily --weekly-publish
-explainlaw publish --mark-published          # дайджест в файл + Telegram
-explainlaw collect --days 3
-explainlaw process --limit 50
-explainlaw rebuild-deltas --resume --limit 200
-explainlaw backfill-pdfs --limit 100
+docker compose --profile local up -d --build
 ```
 
-### Telegram: формат дайджеста
-
-```
-Дайджест ФЗ (дд.мм–дд.мм.гггг)
-
-1. №…-ФЗ — название
-Текст карточки…
-🔗 Источник   ← ссылка на pravo.gov.ru
-```
-
-Нужно: бот добавлен в группу и может писать.  
-Алерты: `⚠️ ExplainLaw` + текст проблемы (тихий сбор и т.п.).
+В `.env` для сети compose используйте хосты `postgres`, `minio`, `kafka`.
 
 ---
 
-## 6. OCR — кратко
+## 7. Чеклист
 
-| Ситуация | Поведение |
-|----------|-----------|
-| `OCR_ENABLED=false` | Новые сканы без текстового слоя → плохой/пустой текст |
-| `OCR_ENABLED=true` | OCR только если в PDF мало текста; уже заполненный `npa_text` в обычном process **не** трогается |
-| Движок | `OCR_ENGINE=paddle` (запас: `tesseract`, `yandex`) |
-
-Массовый догон OCR: `RUN_OCR=1 ./scripts/backfill_prod.sh` или `python scripts/ocr_backfill.py`.
-
----
-
-## 7. LLM / модели
-
-| Задача | Модель | Как |
-|--------|--------|-----|
-| Дельты / norm events («расшифровка») | Qwen3 8B | Kafka `llm.requests` / `llm.responses` |
-| Публичная сводка | Gateway (если задан) иначе Qwen/механический fallback | HTTP |
-| Гейт №2 semantic | Gateway → иначе Qwen | после механики |
-
-Без живого Qwen-worker дельты строятся regex-fallback’ом (хуже полнота).
+- [ ] `.env` с Yandex / AWS / Telegram  
+- [ ] `docker compose up -d --build` → app + cron  
+- [ ] `alembic upgrade head`  
+- [ ] Qwen-worker на Kafka  
+- [ ] Бот в TG-группе  
+- [ ] `docker compose exec app explainlaw status`  
 
 ---
 
-## 8. Чеклист «прод жив»
-
-- [ ] `.env` на хосте, `explainlaw status` отвечает  
-- [ ] `docker compose up` → `no service selected` (ожидаемо)  
-- [ ] Cron `--prod` установлен (`crontab -l`)  
-- [ ] `OCR_ENABLED=true` (для новых сканов)  
-- [ ] Qwen-worker слушает Kafka  
-- [ ] Бот в Telegram-группе, `publish --mark-published` или weekly отрабатывает  
-- [ ] CA для Kafka лежит по `KAFKA_SSL_CA_LOCATION`  
-- [ ] Gateway (по желанию) для «лица» сводок  
-
----
-
-## 9. Локальная разработка (не прод)
-
-```bash
-cp .env.example .env          # localhost Postgres/MinIO/Kafka
-docker compose --profile local up -d
-pip install -e ".[dev]"
-python scripts/init_infra.py
-explainlaw daily
-```
-
----
-
-## 10. Связанные файлы
+## 8. Файлы
 
 | Файл | Назначение |
 |------|------------|
-| `YANDEX_PROD.md` | этот runbook |
-| `.env.example` | шаблон переменных |
-| `scripts/daily_prod.sh` | дневной cron без Docker |
-| `scripts/install-cron.sh --prod` | установка crontab |
-| `PROD_HANDOFF.md` | исторический handoff / перенос данных |
+| `Dockerfile` | образ |
+| `docker-compose.yml` | app + cron (+ local infra) |
+| `docker/crontab` | расписание |
+| `.env.example` | шаблон env |
 | `rule.md` | ТЗ |

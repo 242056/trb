@@ -1,8 +1,48 @@
-# Локальная инфра (dev). На проде (Yandex PG / Kafka / Object Storage) НЕ нужна.
-# Dev:  docker compose --profile local up -d
-# Prod: не запускать compose — только .env + cron (*_prod.sh)
+# ExplainLaw Compose
+#
+# Прод (Yandex PG/Kafka/S3) — только приложение:
+#   docker compose up -d --build
+#
+# Локально + своя инфра:
+#   docker compose --profile local up -d --build
+#
+# Инфра без приложения:
+#   docker compose --profile local up -d postgres minio kafka
 
 services:
+  # --- Приложение (по умолчанию, без profile) ---
+  app:
+    build: .
+    image: explainlaw:latest
+    env_file: .env
+    ports:
+      - "8000:8000"
+    volumes:
+      - app_logs:/app/logs
+      # CA Yandex Kafka/PG, если нужен файл с хоста:
+      # - ${KAFKA_SSL_CA_HOST:-./certs}:/certs:ro
+    restart: unless-stopped
+    command: ["explainlaw", "serve", "--host", "0.0.0.0", "--port", "8000"]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  cron:
+    image: explainlaw:latest
+    build: .
+    env_file: .env
+    volumes:
+      - app_logs:/app/logs
+    restart: unless-stopped
+    command: ["supercronic", "-passthrough-logs", "/app/docker/crontab"]
+    depends_on:
+      app:
+        condition: service_started
+
+  # --- Локальная инфра (только --profile local) ---
   postgres:
     profiles: ["local"]
     image: postgres:16-alpine
@@ -79,6 +119,7 @@ services:
       start_period: 30s
 
 volumes:
+  app_logs:
   postgres_data:
   minio_data:
   kafka_data:

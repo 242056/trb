@@ -1,0 +1,9 @@
+# Crontab for supercronic (Docker prod / app profile)
+# Daily pipeline
+0 8 * * * explainlaw daily
+# Weekly digest → export + Telegram
+0 9 * * 1 explainlaw daily --weekly-publish
+# Delta / PDF backfill
+0 3 * * 0 explainlaw rebuild-deltas --resume --limit 500
+# Health + Telegram alerts
+30 */6 * * * explainlaw health --alert

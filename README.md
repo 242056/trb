@@ -1,43 +1,34 @@
 # ExplainLaw — база НПА (Шаг 1)
 
-Ежедневный сбор ФЗ с [publication.pravo.gov.ru](http://publication.pravo.gov.ru), извлечение текста, дельты изменений, гейты качества, еженедельная публикация.
+Ежедневный сбор ФЗ с [publication.pravo.gov.ru](http://publication.pravo.gov.ru), обработка, гейты, еженедельная публикация в Telegram.
 
-**Репозиторий прода:** https://github.com/explain-law/regulatory-legal-acts
+**Репо:** https://github.com/explain-law/regulatory-legal-acts
 
-## Быстрый старт (локально)
+## Прод (Docker + Yandex)
+
+```bash
+cp .env.example .env   # Yandex PG / Kafka / Object Storage / Telegram
+sudo docker compose up -d --build
+sudo docker compose exec app alembic upgrade head
+sudo docker compose exec app explainlaw status
+```
+
+Подымаются **app** (API :8000) и **cron** (daily/weekly/health).  
+Локальные Postgres/MinIO/Kafka **не** стартуют.
+
+Полная инструкция: **[YANDEX_PROD.md](YANDEX_PROD.md)**.
+
+## Локально (инфра в Docker)
 
 ```bash
 cp .env.example .env
-docker compose --profile local up -d
-python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
-python scripts/init_infra.py
-explainlaw status
-explainlaw daily
-```
-
-`docker compose up` без `--profile local` → `no service selected` (на проде так и должно быть).
-
-## Прод
-
-Полная инструкция: **[YANDEX_PROD.md](YANDEX_PROD.md)**  
-(Yandex PG + Kafka + Object Storage, cron, OCR, Telegram, без Docker.)
-
-```bash
-cp .env.example .env    # заполнить секреты
-pip install -e ".[dev,ocr]"
-alembic upgrade head
-./scripts/install-cron.sh --prod
+docker compose --profile local up -d --build
 ```
 
 ## Документация
 
 | Файл | О чём |
 |------|--------|
-| [YANDEX_PROD.md](YANDEX_PROD.md) | **Прод-runbook** (актуальный) |
-| [PROD_HANDOFF.md](PROD_HANDOFF.md) | Историческая передача / перенос данных |
-| [rule.md](rule.md) | Техническое задание |
-
-## Данные не в git
-
-Секреты (`.env`), архивы MinIO (`*.tar.gz`) и PDF — только вне репозитория. Сырьё на проде уже в Yandex Object Storage `explain-npa`.
+| [YANDEX_PROD.md](YANDEX_PROD.md) | Прод-runbook |
+| [PROD_HANDOFF.md](PROD_HANDOFF.md) | Исторический handoff |
+| [rule.md](rule.md) | ТЗ |
