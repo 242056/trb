@@ -17,15 +17,15 @@ services:
     container_name: regulatory-legal-acts-app
     env_file: .env
     ports:
-      - "8000:8000"
+      - "7000:7000"
     volumes:
       - app_logs:/app/logs
       # CA Yandex Kafka/PG, если нужен файл с хоста:
       # - ${KAFKA_SSL_CA_HOST:-./certs}:/certs:ro
     restart: unless-stopped
-    command: ["explainlaw", "serve", "--host", "0.0.0.0", "--port", "8000"]
+    command: ["explainlaw", "serve", "--host", "0.0.0.0", "--port", "7000"]
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/health"]
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:7000/health"]
       interval: 30s
       timeout: 5s
       retries: 3

@@ -13,7 +13,7 @@ sudo docker compose exec app alembic upgrade head
 sudo docker compose exec app explainlaw status
 ```
 
-Подымаются **app** (API :8000) и **cron** (daily/weekly/health).  
+Подымаются **app** (API :7000) и **cron** (daily/weekly/health).  
 Локальные Postgres/MinIO/Kafka **не** стартуют.
 
 Полная инструкция: **[YANDEX_PROD.md](YANDEX_PROD.md)**.

@@ -456,7 +456,7 @@ def main() -> None:
 
     p_serve = sub.add_parser("serve", help="Запустить веб-интерфейс")
     p_serve.add_argument("--host", default="0.0.0.0")
-    p_serve.add_argument("--port", type=int, default=8000)
+    p_serve.add_argument("--port", type=int, default=7000)
     p_serve.add_argument("--reload", action="store_true")
     p_serve.set_defaults(func=cmd_serve)
 

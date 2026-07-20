@@ -33,14 +33,14 @@ sudo docker compose up -d --build
 ```
 
 Поднятся:
-- **app** — API на `:8000` (`explainlaw serve`)
+- **app** — API на `:7000` (`explainlaw serve`)
 - **cron** — supercronic: daily / weekly / backfill / health
 
 Проверка:
 
 ```bash
 sudo docker compose ps
-curl -s http://127.0.0.1:8000/health
+curl -s http://127.0.0.1:7000/health
 sudo docker compose exec app explainlaw status
 sudo docker compose logs -f cron
 ```

@@ -33,4 +33,4 @@ ENV PYTHONUNBUFFERED=1 \
 RUN mkdir -p /app/logs/published
 
 # По умолчанию — API; cron-сервис переопределяет command
-CMD ["explainlaw", "serve", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["explainlaw", "serve", "--host", "0.0.0.0", "--port", "7000"]

@@ -60,7 +60,7 @@ npa_raw       npa_summary post_bank
 | `daily` | Полный ежедневный конвейер |
 | `health` | Здоровье + алерты |
 | `status` | Метрики заполнения БД |
-| `serve` | FastAPI веб-интерфейс (:8000) |
+| `serve` | FastAPI веб-интерфейс (:7000) |
 
 ### 2.3. Ключевые модули
 
@@ -323,7 +323,7 @@ chmod +x scripts/*.sh
 ./scripts/install-cron.sh
 
 # 9. Веб (опционально)
-explainlaw serve --host 0.0.0.0 --port 8000
+explainlaw serve --host 0.0.0.0 --port 7000
 ```
 
 ### 5.3. Перенос существующей БД и MinIO (с dev-машины на прод)
@@ -522,7 +522,7 @@ explainlaw publish
 | Журнал запусков | `SELECT * FROM pipeline_run ORDER BY started_at DESC` |
 | Логи cron | `/var/log/explainlaw-daily.log` или `$ROOT/logs/` |
 | MinIO console | `http://<host>:9001` |
-| Веб-UI | `explainlaw serve` → `http://<host>:8000` |
+| Веб-UI | `explainlaw serve` → `http://<host>:7000` |
 
 ---
 
