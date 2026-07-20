@@ -18,7 +18,7 @@ if [ "${1:-}" = "--weekly-publish" ]; then
   WEEKLY="--weekly-publish"
 fi
 
-docker compose up -d
+docker compose --profile local up -d
 python scripts/init_infra.py
 explainlaw daily $WEEKLY
 

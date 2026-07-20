@@ -6,7 +6,8 @@
 
 ```bash
 cp .env.example .env
-docker compose up -d
+# Локально (Postgres/MinIO/Kafka в Docker):
+docker compose --profile local up -d
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 python scripts/init_infra.py
@@ -14,18 +15,19 @@ explainlaw status
 explainlaw daily
 ```
 
-## Прод (без VPS)
+На проде с Yandex PG/Kafka/Object Storage compose **не нужен** — только `.env` и `./scripts/install-cron.sh --prod`.  
+`docker compose up` без `--profile local` ничего не поднимет (образы не качает).
 
-Целевая схема: Yandex Managed PostgreSQL + Yandex Kafka (Qwen) + MinIO.
+## Прод (без локального Docker)
+
+Целевая схема: Yandex Managed PostgreSQL + Yandex Kafka (Qwen) + Object Storage.
 
 ```bash
-cp .env.example .env   # заполнить Yandex / MinIO / Gateway / алерты
+cp .env.example .env   # заполнить Yandex / AWS_* / Gateway / алерты
 ./scripts/install-cron.sh --prod
 ```
 
 Подробно: [YANDEX_PROD.md](YANDEX_PROD.md).
-
-## Документация
 
 - [YANDEX_PROD.md](YANDEX_PROD.md) — прод на Yandex Cloud, cron, TIFF-ZIP, OCR
 - [PROD_HANDOFF.md](PROD_HANDOFF.md) — передача на прод, перенос БД и MinIO

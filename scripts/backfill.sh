@@ -15,7 +15,7 @@ if [ -n "$LIMIT" ]; then
   LIMIT_ARG="--limit $LIMIT"
 fi
 
-docker compose up -d
+docker compose --profile local up -d
 python scripts/init_infra.py
 
 echo "[backfill] rebuild-deltas $LIMIT_ARG"

@@ -2,6 +2,13 @@
 
 VPS больше не используется. Прод-целевая схема: **Yandex Managed PostgreSQL + Yandex Managed Kafka (Qwen) + MinIO** (отдельный хост/Object Storage).
 
+## 0. Docker на проде
+
+`docker compose up` **ничего не поднимает** — Postgres/MinIO/Kafka вынесены в profile `local`.
+
+Локальная отладка: `docker compose --profile local up -d`.  
+Прод: только `.env` + cron (`daily_prod.sh`), без compose.
+
 ## 1. Инфраструктура
 
 | Компонент | Куда |
