@@ -1,9 +1,10 @@
-# Crontab for supercronic (Docker prod / app profile)
+# Static fallback crontab (prod uses docker/cron-entrypoint.sh → render from env).
+# Defaults match CRON_*_SCHEDULE in .env.example.
 # Daily pipeline
-0 8 * * * explainlaw daily
+0 8 * * * /usr/local/bin/explainlaw daily
 # Weekly digest → export + Telegram
-0 9 * * 1 explainlaw daily --weekly-publish
+0 9 * * 1 /usr/local/bin/explainlaw daily --weekly-publish
 # Delta / PDF backfill
-0 3 * * 0 explainlaw rebuild-deltas --resume --limit 500
+0 3 * * 0 /usr/local/bin/explainlaw rebuild-deltas --resume --limit 500
 # Health + Telegram alerts
-30 */6 * * * explainlaw health --alert
+30 */6 * * * /usr/local/bin/explainlaw health --alert

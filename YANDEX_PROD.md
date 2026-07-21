@@ -89,14 +89,47 @@ CA Kafka: положите сертификат в `./certs` и раскомме
 
 ---
 
-## 4. Расписание (`docker/crontab`)
+## 4. Расписание и прод-тест
 
-| Когда | Команда |
-|-------|---------|
-| 08:00 ежедневно | `explainlaw daily` |
-| 09:00 пн | `explainlaw daily --weekly-publish` (+ Telegram) |
-| 03:00 вс | `rebuild-deltas --resume --limit 500` |
-| */6 ч :30 | `explainlaw health --alert` |
+Расписание собирается из env при старте `cron` (`docker/cron-entrypoint.sh`).
+
+| Env | По умолчанию | Команда |
+|-----|--------------|---------|
+| `CRON_DAILY_SCHEDULE` | `0 8 * * *` | `explainlaw daily` |
+| `CRON_WEEKLY_SCHEDULE` | `0 9 * * 1` | `daily --weekly-publish` (+ Telegram) |
+| `CRON_BACKFILL_SCHEDULE` | `0 3 * * 0` | `rebuild-deltas --resume` |
+| `CRON_HEALTH_SCHEDULE` | `30 */6 * * *` | `health --alert` |
+
+Лимиты парсинга: `PIPELINE_PROCESS_LIMIT`, `PIPELINE_FETCH_MISSING_LIMIT`, `PIPELINE_BACKFILL_LIMIT`, `PIPELINE_SMOKE_PROCESS_LIMIT`.
+
+### Быстрый полный прогон на VPS/проде
+
+VPS подходит как хост приложения, если `.env` указывает на Yandex PG + Kafka + S3 (не localhost).
+
+```bash
+# в .env на сервере:
+cp .env.yandex.local .env   # или ваш прод-.env
+# добавить:
+CRON_RUN_ON_START=true
+CRON_RUN_ON_START_JOB=smoke   # или weekly
+PIPELINE_SMOKE_PROCESS_LIMIT=5
+TZ=Europe/Moscow
+
+sudo docker compose up -d --build
+sudo docker compose logs -f cron
+```
+
+`smoke` = collect → process/gate (лимит) → fetch-missing → weekly publish → Telegram + запись в БД.
+
+Разовый прогон без перезапуска cron:
+
+```bash
+sudo docker compose exec app explainlaw prod-smoke
+# или полный weekly:
+sudo docker compose exec app explainlaw daily --weekly-publish
+```
+
+После проверки выключите `CRON_RUN_ON_START=false`, иначе при каждом рестарте контейнера снова уйдёт дайджест.
 
 ---
 
@@ -135,6 +168,9 @@ docker compose --profile local up -d --build
 |------|------------|
 | `Dockerfile` | образ |
 | `docker-compose.yml` | app + cron (+ local infra) |
-| `docker/crontab` | расписание |
+| `docker/crontab` | fallback-расписание (абсолютные пути) |
+| `docker/cron-entrypoint.sh` | генерация crontab из env + RUN_ON_START |
+| `docker/render_crontab.py` | рендер crontab |
+
 | `.env.example` | шаблон env |
 | `rule.md` | ТЗ |

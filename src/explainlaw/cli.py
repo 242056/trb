@@ -56,7 +56,7 @@ def cmd_collect(args: argparse.Namespace) -> int:
         try:
             stats = collector.collect(
                 target_date=target_date,
-                period_type=args.period,
+                period_type=args.period or settings.collect_period_type,
                 date_from=date_from,
                 date_to=date_to,
                 all_catalog=args.all_catalog,
@@ -154,7 +154,9 @@ def cmd_rebuild_deltas(args: argparse.Namespace) -> int:
             rebuild_deltas_only=True,
             resume=resume,
         )
-        process_stats = processor.process(limit=args.limit)
+        process_stats = processor.process(
+            limit=args.limit if args.limit is not None else settings.pipeline_backfill_limit
+        )
         record_run(session, job_type=PipelineJobType.process, metrics=process_stats.to_dict())
         session.commit()
 
@@ -163,7 +165,7 @@ def cmd_rebuild_deltas(args: argparse.Namespace) -> int:
             kafka_producer=producer,
             force=True,
             amendments_only=True,
-        ).run(limit=args.limit)
+        ).run(limit=args.limit if args.limit is not None else settings.pipeline_backfill_limit)
         record_run(session, job_type=PipelineJobType.gate, metrics=gate_stats.to_dict())
         session.commit()
 
@@ -180,17 +182,64 @@ def cmd_rebuild_deltas(args: argparse.Namespace) -> int:
 def cmd_daily(args: argparse.Namespace) -> int:
     storage = get_storage()
     target_date = date.fromisoformat(args.date) if args.date else None
+    process_limit = (
+        args.process_limit
+        if args.process_limit is not None
+        else settings.pipeline_process_limit
+    )
+    fetch_missing = (
+        args.fetch_missing
+        if args.fetch_missing is not None
+        else settings.pipeline_fetch_missing_limit
+    )
     with kafka_producer() as producer, SessionLocal() as session:
         pipeline = DailyPipeline(session, storage, kafka_producer=producer)
         stats = pipeline.run(
             target_date=target_date,
-            process_limit=args.process_limit,
-            fetch_missing_limit=args.fetch_missing,
+            process_limit=process_limit,
+            fetch_missing_limit=fetch_missing,
             weekly_publish=args.weekly_publish,
             send_alerts=not args.no_alert,
         )
 
     print(json.dumps(stats.to_dict(), ensure_ascii=False, indent=2))
+    return 0 if stats.health.get("healthy", True) else 1
+
+
+def cmd_prod_smoke(args: argparse.Namespace) -> int:
+    """Прод-smoke: collect → process/gate (лимит) → fetch-missing → weekly publish + Telegram."""
+    storage = get_storage()
+    limit = (
+        args.process_limit
+        if args.process_limit is not None
+        else settings.pipeline_smoke_process_limit
+    )
+    fetch_missing = (
+        args.fetch_missing
+        if args.fetch_missing is not None
+        else settings.pipeline_fetch_missing_limit
+    )
+    with kafka_producer() as producer, SessionLocal() as session:
+        pipeline = DailyPipeline(session, storage, kafka_producer=producer)
+        stats = pipeline.run(
+            process_limit=limit,
+            fetch_missing_limit=fetch_missing,
+            weekly_publish=not args.skip_publish,
+            send_alerts=not args.no_alert,
+        )
+        status = {
+            "in_database": session.execute(select(func.count()).select_from(NpaDocument)).scalar_one(),
+            "with_text": session.execute(select(func.count()).select_from(NpaText)).scalar_one(),
+            "with_summary": session.execute(select(func.count()).select_from(NpaSummary)).scalar_one(),
+        }
+
+    print(
+        json.dumps(
+            {"smoke": stats.to_dict(), "status": status},
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
     return 0 if stats.health.get("healthy", True) else 1
 
 
@@ -210,7 +259,9 @@ def cmd_backfill_pdfs(args: argparse.Namespace) -> int:
     with kafka_producer() as producer, SessionLocal() as session:
         collector = DailyCollector(session, storage, kafka_producer=producer)
         try:
-            stats = collector.backfill_missing_pdfs(limit=args.limit)
+            stats = collector.backfill_missing_pdfs(
+                limit=args.limit if args.limit is not None else settings.pipeline_backfill_pdf_limit
+            )
             record_run(session, job_type=PipelineJobType.collect, metrics=stats)
             session.commit()
         finally:
@@ -355,9 +406,9 @@ def main() -> None:
     )
     p_collect.add_argument(
         "--period",
-        default="daily",
+        default=None,
         choices=["daily", "weekly", "monthly"],
-        help="PeriodType для API при сборе без --date (по умолчанию daily)",
+        help="PeriodType для API при сборе без --date (env COLLECT_PERIOD_TYPE)",
     )
     p_collect.set_defaults(func=cmd_collect)
 
@@ -436,8 +487,18 @@ def main() -> None:
 
     p_daily = sub.add_parser("daily", help="Ежедневный конвейер: collect → process → gate → fetch-missing")
     p_daily.add_argument("--date", help="День сбора YYYY-MM-DD (по умолчанию сегодня)")
-    p_daily.add_argument("--process-limit", type=int, help="Лимит документов на обработку/гейты")
-    p_daily.add_argument("--fetch-missing", type=int, default=3, help="Сколько актов из очереди подтянуть")
+    p_daily.add_argument(
+        "--process-limit",
+        type=int,
+        default=None,
+        help="Лимит документов (иначе PIPELINE_PROCESS_LIMIT)",
+    )
+    p_daily.add_argument(
+        "--fetch-missing",
+        type=int,
+        default=None,
+        help="Сколько актов из очереди (иначе PIPELINE_FETCH_MISSING_LIMIT)",
+    )
     p_daily.add_argument(
         "--weekly-publish",
         action="store_true",
@@ -445,6 +506,16 @@ def main() -> None:
     )
     p_daily.add_argument("--no-alert", action="store_true", help="Не отправлять webhook-алерт")
     p_daily.set_defaults(func=cmd_daily)
+
+    p_smoke = sub.add_parser(
+        "prod-smoke",
+        help="Прод-тест: daily + weekly publish (лимит PIPELINE_SMOKE_PROCESS_LIMIT)",
+    )
+    p_smoke.add_argument("--process-limit", type=int, default=None)
+    p_smoke.add_argument("--fetch-missing", type=int, default=None)
+    p_smoke.add_argument("--skip-publish", action="store_true", help="Без дайджеста/Telegram")
+    p_smoke.add_argument("--no-alert", action="store_true")
+    p_smoke.set_defaults(func=cmd_prod_smoke)
 
     p_health = sub.add_parser("health", help="Проверка здоровья конвейера и алерты (§11)")
     p_health.add_argument("--alert", action="store_true", help="Отправить webhook при проблемах")

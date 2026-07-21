@@ -13,8 +13,16 @@ sudo docker compose exec app alembic upgrade head
 sudo docker compose exec app explainlaw status
 ```
 
-Подымаются **app** (API :7000) и **cron** (daily/weekly/health).  
+Подымаются **app** (API :7000) и **cron** (расписание из env, см. `CRON_*`).  
 Локальные Postgres/MinIO/Kafka **не** стартуют.
+
+Прод-smoke (сбор + лимит обработки + дайджест/Telegram):
+
+```bash
+# в .env: CRON_RUN_ON_START=true, CRON_RUN_ON_START_JOB=smoke
+# или разово:
+sudo docker compose exec app explainlaw prod-smoke
+```
 
 Полная инструкция: **[YANDEX_PROD.md](YANDEX_PROD.md)**.
 

@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 FROM python:3.11-slim-bookworm
 
-ARG TARGETARCH=amd64
+ARG TARGETARCH
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates \
@@ -10,9 +10,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       tesseract-ocr \
       tesseract-ocr-rus \
     && rm -rf /var/lib/apt/lists/* \
+    && ARCH="${TARGETARCH:-amd64}" \
+    && case "$ARCH" in amd64|arm64) ;; *) ARCH=amd64 ;; esac \
     && curl -fsSL -o /usr/local/bin/supercronic \
-      "https://github.com/aptible/supercronic/releases/download/v0.2.33/supercronic-linux-${TARGETARCH}" \
-    && chmod +x /usr/local/bin/supercronic
+      "https://github.com/aptible/supercronic/releases/download/v0.2.33/supercronic-linux-${ARCH}" \
+    && chmod +x /usr/local/bin/supercronic \
+    && printf '%s\n' '* * * * * true' > /tmp/sc-test.cron \
+    && /usr/local/bin/supercronic -test /tmp/sc-test.cron \
+    && rm -f /tmp/sc-test.cron
 
 WORKDIR /app
 
@@ -23,9 +28,13 @@ COPY alembic.ini ./
 COPY scripts ./scripts
 COPY docker ./docker
 
-RUN pip install --no-cache-dir -e ".[ocr]"
+RUN pip install --no-cache-dir -e ".[ocr]" \
+    && chmod +x /app/docker/cron-entrypoint.sh \
+    && test -x /usr/local/bin/explainlaw
 
 ENV PYTHONUNBUFFERED=1 \
+    PATH="/usr/local/bin:${PATH}" \
+    TZ=Europe/Moscow \
     OCR_ENGINE=tesseract \
     PUBLISH_EXPORT_DIR=/app/logs/published \
     ALERT_LOG_PATH=/app/logs/alerts.jsonl

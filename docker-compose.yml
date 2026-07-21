@@ -36,10 +36,15 @@ services:
     build: .
     container_name: regulatory-legal-acts-cron
     env_file: .env
+    environment:
+      TZ: ${TZ:-Europe/Moscow}
+      CRON_TIMEZONE: ${CRON_TIMEZONE:-Europe/Moscow}
     volumes:
       - app_logs:/app/logs
+      # CA Yandex Kafka/PG:
+      # - ${KAFKA_SSL_CA_HOST:-./certs}:/certs:ro
     restart: unless-stopped
-    command: ["supercronic", "-passthrough-logs", "/app/docker/crontab"]
+    command: ["/app/docker/cron-entrypoint.sh"]
     depends_on:
       app:
         condition: service_started

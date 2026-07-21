@@ -1,4 +1,4 @@
-from pydantic import model_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -80,6 +80,42 @@ class Settings(BaseSettings):
 
     # LLM second-look / semantic gate (§9) — только после механики
     gate_llm_verify: bool = True
+
+    # --- Pipeline limits (daily / backfill; CLI перекрывает при явном флаге) ---
+    pipeline_process_limit: int | None = None
+    pipeline_fetch_missing_limit: int = 3
+    pipeline_backfill_limit: int = 500
+    pipeline_backfill_pdf_limit: int | None = None
+    # Период сбора, если daily без --date (daily|weekly|monthly) — для collect CLI
+    collect_period_type: str = "daily"
+
+    # --- Cron (Docker supercronic; расписание и флаги из env) ---
+    cron_timezone: str = "Europe/Moscow"
+    cron_daily_enabled: bool = True
+    cron_daily_schedule: str = "0 8 * * *"
+    cron_weekly_enabled: bool = True
+    cron_weekly_schedule: str = "0 9 * * 1"
+    cron_backfill_enabled: bool = True
+    cron_backfill_schedule: str = "0 3 * * 0"
+    cron_health_enabled: bool = True
+    cron_health_schedule: str = "30 */6 * * *"
+    # При старте cron-контейнера сразу прогнать job (прод-тест)
+    cron_run_on_start: bool = False
+    # daily | weekly | health | smoke
+    cron_run_on_start_job: str = "weekly"
+    # Лимит документов для smoke / быстрого прод-теста
+    pipeline_smoke_process_limit: int = 5
+
+    @field_validator(
+        "pipeline_process_limit",
+        "pipeline_backfill_pdf_limit",
+        mode="before",
+    )
+    @classmethod
+    def _empty_optional_int(cls, value: object) -> object:
+        if value is None or value == "":
+            return None
+        return value
 
     @model_validator(mode="after")
     def apply_aws_object_storage_aliases(self) -> "Settings":
