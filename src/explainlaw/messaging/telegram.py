@@ -65,12 +65,13 @@ def _send_one(text: str, *, parse_mode: str | None) -> bool:
     }
     if parse_mode:
         payload["parse_mode"] = parse_mode
+    base = (settings.telegram_api_base or "https://api.telegram.org").rstrip("/")
+    url = f"{base}/bot{settings.telegram_bot_token}/sendMessage"
     try:
-        response = httpx.post(
-            f"https://api.telegram.org/bot{settings.telegram_bot_token}/sendMessage",
-            json=payload,
-            timeout=20.0,
-        )
+        # local_address=0.0.0.0 — форсируем IPv4 (на части VPS AAAA → Network unreachable)
+        transport = httpx.HTTPTransport(local_address="0.0.0.0")
+        with httpx.Client(transport=transport, timeout=20.0) as client:
+            response = client.post(url, json=payload)
         if response.status_code >= 400:
             logger.warning("Telegram API %s: %s", response.status_code, response.text[:300])
             return False

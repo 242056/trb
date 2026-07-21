@@ -18,6 +18,9 @@ services:
     env_file: .env
     ports:
       - "7000:7000"
+    extra_hosts:
+      # DNS api.telegram.org часто резолвится в заблокированный IP; этот DC доступен с VPS
+      - "api.telegram.org:149.154.167.220"
     volumes:
       - app_logs:/app/logs
       # CA Yandex Kafka/PG, если нужен файл с хоста:
@@ -39,6 +42,8 @@ services:
     environment:
       TZ: ${TZ:-Europe/Moscow}
       CRON_TIMEZONE: ${CRON_TIMEZONE:-Europe/Moscow}
+    extra_hosts:
+      - "api.telegram.org:149.154.167.220"
     volumes:
       - app_logs:/app/logs
       # CA Yandex Kafka/PG:

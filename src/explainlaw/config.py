@@ -77,6 +77,8 @@ class Settings(BaseSettings):
     telegram_chat_id: str = ""
     # Слать дайджест в Telegram при publish --mark-published / weekly
     telegram_publish: bool = True
+    # База Bot API (если DNS/IP api.telegram.org режется провайдером)
+    telegram_api_base: str = "https://api.telegram.org"
 
     # LLM second-look / semantic gate (§9) — только после механики
     gate_llm_verify: bool = True
