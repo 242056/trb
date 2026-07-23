@@ -9,6 +9,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       libpq5 \
       tesseract-ocr \
       tesseract-ocr-rus \
+    && mkdir -p /usr/local/share/ca-certificates/Yandex \
+    && curl -fsSL -o /usr/local/share/ca-certificates/Yandex/YandexInternalRootCA.crt \
+      "https://storage.yandexcloud.net/cloud-certs/CA.pem" \
+    && chmod 0644 /usr/local/share/ca-certificates/Yandex/YandexInternalRootCA.crt \
     && rm -rf /var/lib/apt/lists/* \
     && ARCH="${TARGETARCH:-amd64}" \
     && case "$ARCH" in amd64|arm64) ;; *) ARCH=amd64 ;; esac \
@@ -37,7 +41,8 @@ ENV PYTHONUNBUFFERED=1 \
     TZ=Europe/Moscow \
     OCR_ENGINE=tesseract \
     PUBLISH_EXPORT_DIR=/app/logs/published \
-    ALERT_LOG_PATH=/app/logs/alerts.jsonl
+    ALERT_LOG_PATH=/app/logs/alerts.jsonl \
+    KAFKA_SSL_CA_LOCATION=/usr/local/share/ca-certificates/Yandex/YandexInternalRootCA.crt
 
 RUN mkdir -p /app/logs/published
 

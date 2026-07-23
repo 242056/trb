@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import Generator
 from contextlib import contextmanager
 
@@ -11,6 +12,38 @@ from confluent_kafka import Producer
 from explainlaw.config import settings
 
 logger = logging.getLogger(__name__)
+
+# Путь CA внутри Docker-образа (как в explain-law/local-llm-worker)
+_DOCKER_YANDEX_CA = "/usr/local/share/ca-certificates/Yandex/YandexInternalRootCA.crt"
+_FALLBACK_CAS = (
+    _DOCKER_YANDEX_CA,
+    "/certs/YandexCA.crt",
+    "/certs/YandexInternalRootCA.crt",
+)
+
+
+def resolve_kafka_ssl_ca_location(configured: str | None = None) -> str:
+    """Вернуть существующий файл CA; хостовый путь из .env в Docker игнорируем."""
+    candidates: list[str] = []
+    raw = (configured if configured is not None else settings.kafka_ssl_ca_location or "").strip()
+    if raw:
+        candidates.append(raw)
+    for path in _FALLBACK_CAS:
+        if path not in candidates:
+            candidates.append(path)
+    for path in candidates:
+        if os.path.isfile(path):
+            if raw and path != raw:
+                logger.warning(
+                    "KAFKA_SSL_CA_LOCATION=%s недоступен, используем %s",
+                    raw,
+                    path,
+                )
+            return path
+    if raw:
+        logger.error("Kafka CA не найден: %s (и fallbacks %s)", raw, _FALLBACK_CAS)
+        return raw
+    return ""
 
 
 def kafka_common_config() -> dict:
@@ -24,8 +57,9 @@ def kafka_common_config() -> dict:
                 "sasl.password": settings.kafka_password,
             }
         )
-        if settings.kafka_ssl_ca_location:
-            conf["ssl.ca.location"] = settings.kafka_ssl_ca_location
+        ca = resolve_kafka_ssl_ca_location()
+        if ca:
+            conf["ssl.ca.location"] = ca
     return conf
 
 

@@ -16,6 +16,9 @@ services:
     image: regulatory-legal-acts:latest
     container_name: regulatory-legal-acts-app
     env_file: .env
+    environment:
+      # Как в local-llm-worker: CA в образе, .env с хостовым путём не ломает Docker
+      KAFKA_SSL_CA_LOCATION: /usr/local/share/ca-certificates/Yandex/YandexInternalRootCA.crt
     ports:
       - "7000:7000"
     extra_hosts:
@@ -23,8 +26,6 @@ services:
       - "api.telegram.org:149.154.167.220"
     volumes:
       - app_logs:/app/logs
-      # CA Yandex Kafka/PG, если нужен файл с хоста:
-      # - ${KAFKA_SSL_CA_HOST:-./certs}:/certs:ro
     restart: unless-stopped
     command: ["explainlaw", "serve", "--host", "0.0.0.0", "--port", "7000"]
     healthcheck:
@@ -42,12 +43,11 @@ services:
     environment:
       TZ: ${TZ:-Europe/Moscow}
       CRON_TIMEZONE: ${CRON_TIMEZONE:-Europe/Moscow}
+      KAFKA_SSL_CA_LOCATION: /usr/local/share/ca-certificates/Yandex/YandexInternalRootCA.crt
     extra_hosts:
       - "api.telegram.org:149.154.167.220"
     volumes:
       - app_logs:/app/logs
-      # CA Yandex Kafka/PG:
-      # - ${KAFKA_SSL_CA_HOST:-./certs}:/certs:ro
     restart: unless-stopped
     command: ["/app/docker/cron-entrypoint.sh"]
     depends_on:
