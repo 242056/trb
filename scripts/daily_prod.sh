@@ -24,4 +24,3 @@ if [ "${1:-}" = "--weekly-publish" ]; then
 fi
 
 explainlaw daily "${WEEKLY_ARGS[@]}"
-explainlaw health --alert || true

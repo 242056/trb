@@ -12,6 +12,7 @@ def test_render_crontab_defaults():
     assert "health --alert" in text
     assert "0 8 * * *" in text
     assert "0 9 * * 1" in text
+    assert "0 10 * * *" in text
 
 
 def test_render_crontab_custom_schedule_and_limits():

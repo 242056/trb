@@ -71,8 +71,12 @@ class Settings(BaseSettings):
     publish_export_dir: str = "logs/published"
 
     collect_silent_alert_hours: int = 36
+    # Не чаще N Telegram-алертов в сутки (health / daily). 0 = без лимита.
+    alert_telegram_max_per_day: int = 1
     alert_webhook_url: str = ""
     alert_log_path: str = "logs/alerts.jsonl"
+    # Файл-маркер последней отправки TG-алерта (для суточного лимита)
+    alert_telegram_state_path: str = "logs/alert_telegram_state.json"
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
     # Слать дайджест в Telegram при publish --mark-published / weekly
@@ -100,7 +104,7 @@ class Settings(BaseSettings):
     cron_backfill_enabled: bool = True
     cron_backfill_schedule: str = "0 3 * * 0"
     cron_health_enabled: bool = True
-    cron_health_schedule: str = "30 */6 * * *"
+    cron_health_schedule: str = "0 10 * * *"
     # При старте cron-контейнера сразу прогнать job (прод-тест)
     cron_run_on_start: bool = False
     # daily | weekly | health | smoke

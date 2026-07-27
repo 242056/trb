@@ -24,7 +24,7 @@ if [ "$MODE" = "prod" ]; then
 0 8 * * * $DAILY >> $LOG_DIR/explainlaw-daily.log 2>&1
 0 9 * * 1 $DAILY --weekly-publish >> $LOG_DIR/explainlaw-weekly.log 2>&1
 0 3 * * 0 LIMIT=500 $BACKFILL >> $LOG_DIR/explainlaw-backfill.log 2>&1
-30 */6 * * * $HEALTH >> $LOG_DIR/explainlaw-health.log 2>&1
+0 10 * * * $HEALTH >> $LOG_DIR/explainlaw-health.log 2>&1
 0 2 * * 0 $BACKUP >> $LOG_DIR/explainlaw-backup.log 2>&1
 "
 else

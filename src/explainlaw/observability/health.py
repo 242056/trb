@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -103,6 +103,56 @@ def _append_alert_log(health: dict[str, Any]) -> None:
         logger.exception("Не удалось записать alert log %s", path)
 
 
+def _telegram_alert_budget_remaining(*, today: date | None = None) -> bool:
+    """True, если ещё можно слать TG-алерт сегодня (лимит ALERT_TELEGRAM_MAX_PER_DAY)."""
+    limit = settings.alert_telegram_max_per_day
+    if limit <= 0:
+        return True
+    today = today or datetime.now(timezone.utc).date()
+    path = Path(settings.alert_telegram_state_path)
+    try:
+        if not path.exists():
+            return True
+        data = json.loads(path.read_text(encoding="utf-8"))
+        day = data.get("day")
+        count = int(data.get("count") or 0)
+        if day != today.isoformat():
+            return True
+        return count < limit
+    except Exception:
+        logger.exception("Не удалось прочитать %s", path)
+        return True
+
+
+def _record_telegram_alert_sent(*, today: date | None = None) -> None:
+    today = today or datetime.now(timezone.utc).date()
+    path = Path(settings.alert_telegram_state_path)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        count = 1
+        if path.exists():
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                if data.get("day") == today.isoformat():
+                    count = int(data.get("count") or 0) + 1
+            except Exception:
+                count = 1
+        path.write_text(
+            json.dumps(
+                {
+                    "day": today.isoformat(),
+                    "count": count,
+                    "last_at": datetime.now(timezone.utc).isoformat(),
+                },
+                ensure_ascii=False,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+    except Exception:
+        logger.exception("Не удалось записать %s", path)
+
+
 def send_alert_webhook(health: dict[str, Any]) -> bool:
     if health.get("healthy") or not settings.alert_webhook_url:
         return False
@@ -127,12 +177,21 @@ def send_alert_webhook(health: dict[str, Any]) -> bool:
 def send_telegram_alert(health: dict[str, Any]) -> bool:
     if health.get("healthy"):
         return False
+    if not _telegram_alert_budget_remaining():
+        logger.info(
+            "Telegram-алерт пропущен: лимит %s/сутки уже исчерпан",
+            settings.alert_telegram_max_per_day,
+        )
+        return False
     from explainlaw.messaging.telegram import format_alert_for_telegram, send_telegram_text
 
     messages = [a["message"] for a in health.get("alerts", [])]
     if not messages:
         return False
-    return send_telegram_text(format_alert_for_telegram(messages))
+    ok = send_telegram_text(format_alert_for_telegram(messages))
+    if ok:
+        _record_telegram_alert_sent()
+    return ok
 
 
 def send_alerts(health: dict[str, Any]) -> bool:
