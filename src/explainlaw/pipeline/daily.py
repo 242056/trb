@@ -78,6 +78,9 @@ class DailyPipeline:
                 job_type=PipelineJobType.collect,
                 metrics=stats.collect,
             )
+            # Фиксируем collect сразу: иначе падение process (Kafka и т.п.)
+            # откатывает pipeline_run и health орёт «нет успешного сбора».
+            self._session.commit()
 
             processor = DocumentProcessor(
                 self._session, self._storage, kafka_producer=self._kafka
@@ -89,6 +92,7 @@ class DailyPipeline:
                 job_type=PipelineJobType.process,
                 metrics=stats.process,
             )
+            self._session.commit()
 
             gate_stats = GateRunner(self._session, kafka_producer=self._kafka).run(
                 limit=process_limit
@@ -99,6 +103,7 @@ class DailyPipeline:
                 job_type=PipelineJobType.gate,
                 metrics=stats.gate,
             )
+            self._session.commit()
 
             fetch_stats = fetcher.fetch(limit=fetch_missing_limit)
             stats.fetch_missing = fetch_stats.to_dict()
@@ -107,6 +112,7 @@ class DailyPipeline:
                 job_type=PipelineJobType.fetch_missing,
                 metrics=stats.fetch_missing,
             )
+            self._session.commit()
 
             if weekly_publish:
                 publish_stats = WeeklyPublisher(
@@ -118,8 +124,8 @@ class DailyPipeline:
                     job_type=PipelineJobType.publish,
                     metrics=stats.publish,
                 )
+                self._session.commit()
 
-            self._session.commit()
             stats.health = check_health(self._session)
             if send_alerts:
                 stats.alert_sent = dispatch_alerts(stats.health)
