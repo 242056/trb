@@ -51,13 +51,9 @@ class KafkaLLMClient:
             "options": {"temperature": temperature},
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
-        self._producer.produce(
-            self._requests_topic,
-            json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-            key=correlation_id.encode("utf-8"),
-        )
-        self._producer.flush(10)
 
+        # Важно: подписаться на responses ДО produce. Иначе быстрый worker
+        # успевает ответить, а consumer с auto.offset.reset=latest ответ пропускает.
         consumer = Consumer(
             {
                 **kafka_common_config(),
@@ -69,6 +65,19 @@ class KafkaLLMClient:
         consumer.subscribe([self._responses_topic])
         deadline = time.time() + self._timeout_sec
         try:
+            assign_deadline = min(deadline, time.time() + 10.0)
+            while time.time() < assign_deadline and not consumer.assignment():
+                consumer.poll(0.2)
+            if not consumer.assignment():
+                raise TimeoutError("LLM Kafka: нет assignment на llm.responses")
+
+            self._producer.produce(
+                self._requests_topic,
+                json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+                key=correlation_id.encode("utf-8"),
+            )
+            self._producer.flush(10)
+
             while time.time() < deadline:
                 msg = consumer.poll(1.0)
                 if msg is None:
