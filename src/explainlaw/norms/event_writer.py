@@ -162,11 +162,13 @@ def _ensure_baseline(
     raw_reference_id: int | None,
 ) -> None:
     existing = session.execute(
-        select(NormChangeEvent).where(
+        select(NormChangeEvent)
+        .where(
             NormChangeEvent.norm_id == norm.id,
             NormChangeEvent.event_type == NormEventType.baseline,
         )
-    ).scalar_one_or_none()
+        .limit(1)
+    ).scalars().first()
     if existing:
         return
 
