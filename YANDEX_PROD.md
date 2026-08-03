@@ -1,64 +1,64 @@
-# ExplainLaw — инструкция для прода (Yandex)
+# ExplainLaw — деплой на прод-хост (Yandex)
 
 Репозиторий: https://github.com/explain-law/regulatory-legal-acts  
-ТЗ: `rule.md`.
+Ветка для деплоя: **`main`**
+
+На хосте только Docker (`app` + `cron`). PG / Kafka / Object Storage — в Yandex Cloud.
 
 ---
 
-## 1. Архитектура
-
-| Компонент | Где |
-|-----------|-----|
-| **Приложение** (`app` + `cron`) | Docker на хосте |
-| PostgreSQL | Yandex Managed PG (снаружи) |
-| Kafka / Qwen | Yandex Managed Kafka (снаружи) |
-| PDF | Yandex Object Storage `explain-npa` (снаружи) |
-| Telegram | алерты + еженедельный дайджест |
-
-Postgres/MinIO/Kafka **внутри Docker только для локалки** (`--profile local`). На проде их не поднимаем.
-
----
-
-## 2. Прод: запуск всего сервиса через Docker
+## 1. Один раз: поднять сервис
 
 ```bash
 git clone https://github.com/explain-law/regulatory-legal-acts.git
 cd regulatory-legal-acts
 git checkout main
+git pull
 
 cp .env.example .env
-# заполнить Yandex PG / Kafka / AWS_* / Telegram — см. §3
+# заполнить .env: DATABASE_URL, AWS_*, KAFKA_*, TELEGRAM_*  (см. §3)
 
 sudo docker compose up -d --build
+sudo docker compose exec app alembic upgrade head
+
+# проверка
+./scripts/prod_verify.sh
+# или:
+#   curl -s http://127.0.0.1:7000/health
+#   sudo docker compose exec app explainlaw status
 ```
 
-Поднятся:
-- **app** — API на `:7000` (`explainlaw serve`)
-- **cron** — supercronic: daily / weekly / backfill / health
+Подымаются:
+- **app** — API `:7000`
+- **cron** — supercronic: daily / weekly publish / backfill / health
 
-Проверка:
+Логи cron (не app):
 
 ```bash
-sudo docker compose ps
-curl -s http://127.0.0.1:7000/health
-sudo docker compose exec app explainlaw status
-# логи cron-контейнера (не app — там только /health)
 sudo docker compose logs -f cron
-# файл логов job (volume app_logs):
 sudo docker compose exec cron tail -f /app/logs/cron.log
 ```
 
-Миграции (один раз):
-
-```bash
-sudo docker compose exec app alembic upgrade head
-```
-
-Остановка: `sudo docker compose down` (данные Yandex не трогает).
+Остановка: `sudo docker compose down` (данные в Yandex не трогает).
 
 ---
 
-## 3. `.env` (прод)
+## 2. Обновление на уже работающем хосте
+
+```bash
+cd regulatory-legal-acts
+git pull
+sudo docker compose up -d --build
+./scripts/prod_verify.sh
+```
+
+Миграции при необходимости: `sudo docker compose exec app alembic upgrade head`.
+
+---
+
+## 3. `.env` (минимум для прода)
+
+Обязательно:
 
 ```bash
 DATABASE_URL=postgresql+psycopg://USER:PASS@HOST:6432/DB
@@ -74,8 +74,6 @@ KAFKA_USERNAME=llm
 KAFKA_PASSWORD=...
 KAFKA_SECURITY_PROTOCOL=SASL_SSL
 KAFKA_SASL_MECHANISM=SCRAM-SHA-512
-KAFKA_SSL_CA_LOCATION=/certs/YandexCA.crt
-KAFKA_ENABLED=true
 KAFKA_PIPELINE_EVENTS=false
 LLM_TRANSPORT=kafka
 QWEN_MODEL=qwen3:8b
@@ -86,96 +84,85 @@ OCR_ENGINE=tesseract
 TELEGRAM_BOT_TOKEN=...
 TELEGRAM_CHAT_ID=-...
 TELEGRAM_PUBLISH=true
-```
 
-CA Kafka: положите сертификат в `./certs` и раскомментируйте volume в `docker-compose.yml`.
-
----
-
-## 4. Расписание и прод-тест
-
-Расписание собирается из env при старте `cron` (`docker/cron-entrypoint.sh`).
-
-| Env | По умолчанию | Команда |
-|-----|--------------|---------|
-| `CRON_DAILY_SCHEDULE` | `0 8 * * *` | `explainlaw daily` |
-| `CRON_WEEKLY_SCHEDULE` | `0 9 * * 1` | `publish --mark-published` (дайджест → Telegram) |
-| `CRON_BACKFILL_SCHEDULE` | `0 3 * * 0` | `rebuild-deltas --resume` |
-| `CRON_HEALTH_SCHEDULE` | `0 10 * * *` | `health --alert` (1 раз/сутки) |
-
-Telegram-алерты: `ALERT_TELEGRAM_MAX_PER_DAY=1` — не чаще одного сообщения в сутки, даже если health/daily дергают алерт несколько раз.
-
-Лимиты парсинга: `PIPELINE_PROCESS_LIMIT`, `PIPELINE_FETCH_MISSING_LIMIT`, `PIPELINE_BACKFILL_LIMIT`, `PIPELINE_SMOKE_PROCESS_LIMIT`.
-
-### Быстрый полный прогон на VPS/проде
-
-VPS подходит как хост приложения, если `.env` указывает на Yandex PG + Kafka + S3 (не localhost).
-
-```bash
-# в .env на сервере:
-cp .env.yandex.local .env   # или ваш прод-.env
-# добавить:
-CRON_RUN_ON_START=true
-CRON_RUN_ON_START_JOB=smoke   # или weekly
-PIPELINE_SMOKE_PROCESS_LIMIT=5
+PIPELINE_PROCESS_LIMIT=50
 TZ=Europe/Moscow
-
-sudo docker compose up -d --build
-sudo docker compose logs -f cron
+CRON_RUN_ON_START=false
 ```
 
-`smoke` = collect → process/gate (лимит) → fetch-missing → weekly publish → Telegram + запись в БД.
+Важно:
+- **Не** задавайте хостовый `KAFKA_SSL_CA_LOCATION` — CA уже в образе, compose выставляет путь внутри контейнера.
+- `OCR_ENABLED=true` обязателен для сканов PDF (в образе tesseract + rus).
+- `CRON_RUN_ON_START` держите `false`, иначе при каждом рестарте cron снова уйдёт job (smoke/weekly).
 
-Разовый прогон без перезапуска cron:
+Полный список переменных — в `.env.example`.
+
+---
+
+## 4. Расписание (как должно быть после старта)
+
+Генерируется при старте контейнера `cron` (`docker/cron-entrypoint.sh` → `cron-run.sh`).
+
+| Когда (MSK) | Команда |
+|-------------|---------|
+| каждый день 08:00 | `daily --process-limit 50 --fetch-missing 3` |
+| пн 09:00 | `publish --mark-published` (дайджест **за прошедшую** пн–вс → Telegram) |
+| вс 03:00 | `rebuild-deltas --resume --limit 500` |
+| каждый день 10:00 | `health --alert` |
+
+Проверка crontab внутри контейнера:
 
 ```bash
+sudo docker compose exec cron cat /tmp/explainlaw.crontab
+```
+
+В crontab **не должно** быть `--weekly-publish`. Weekly = только `publish`.
+
+Дайджест: заголовок вида `Дайджест ФЗ (27.07–02.08.2026)` = прошедшая неделя.  
+OCR soft-wraps склеиваются при публикации.
+
+---
+
+## 5. Разовый smoke (опционально)
+
+```bash
+# в .env временно:
+# CRON_RUN_ON_START=true
+# CRON_RUN_ON_START_JOB=smoke
+# PIPELINE_SMOKE_PROCESS_LIMIT=5
+# затем: sudo docker compose up -d cron
+# после проверки: CRON_RUN_ON_START=false и recreate cron
+
+# или без рестарта cron:
 sudo docker compose exec app explainlaw prod-smoke
-# или только дайджест в Telegram:
-sudo docker compose exec app explainlaw publish --mark-published
+sudo docker compose exec app explainlaw publish --mark-published   # только дайджест
 ```
 
-После проверки выключите `CRON_RUN_ON_START=false`, иначе при каждом рестарте контейнера снова уйдёт дайджест.
+---
+
+## 6. Чеклист
+
+- [ ] `main` актуален (`git pull`)
+- [ ] `.env` с Yandex PG / S3 / Kafka / Telegram
+- [ ] `OCR_ENABLED=true`, `OCR_ENGINE=tesseract`
+- [ ] `PIPELINE_PROCESS_LIMIT=50`, `CRON_RUN_ON_START=false`
+- [ ] `docker compose up -d --build` → app + cron Up
+- [ ] `alembic upgrade head`
+- [ ] `./scripts/prod_verify.sh` → OK
+- [ ] Qwen-worker слушает Kafka `llm.requests` / `llm.responses`
+- [ ] Бот в TG-группе; в пн 09:00 ждём дайджест
 
 ---
 
-## 5. OCR / модели
-
-- OCR в образе: **tesseract** (+ rus). Старые тексты в БД при обычном process не переOCR’ятся.
-- Расшифровка норм: **Qwen3 8B** через Kafka.
-- Gateway — опционально для публичных сводок.
-
----
-
-## 6. Локально (инфра + app)
-
-```bash
-docker compose --profile local up -d --build
-```
-
-В `.env` для сети compose используйте хосты `postgres`, `minio`, `kafka`.
-
----
-
-## 7. Чеклист
-
-- [ ] `.env` с Yandex / AWS / Telegram  
-- [ ] `docker compose up -d --build` → app + cron  
-- [ ] `alembic upgrade head`  
-- [ ] Qwen-worker на Kafka  
-- [ ] Бот в TG-группе  
-- [ ] `docker compose exec app explainlaw status`  
-
----
-
-## 8. Файлы
+## 7. Файлы
 
 | Файл | Назначение |
 |------|------------|
-| `Dockerfile` | образ |
-| `docker-compose.yml` | app + cron (+ local infra) |
-| `docker/crontab` | fallback-расписание (абсолютные пути) |
-| `docker/cron-entrypoint.sh` | генерация crontab из env + RUN_ON_START |
-| `docker/render_crontab.py` | рендер crontab |
-
-| `.env.example` | шаблон env |
+| `Dockerfile` | образ (tesseract, supercronic, Yandex CA) |
+| `docker-compose.yml` | app + cron |
+| `docker/cron-entrypoint.sh` | crontab из env + RUN_ON_START |
+| `docker/cron-run.sh` | START/OK/FAIL → stdout + `/app/logs/cron.log` |
+| `docker/crontab` | fallback (должен совпадать с render) |
+| `.env.example` | шаблон |
+| `scripts/prod_verify.sh` | проверка после деплоя |
 | `rule.md` | ТЗ |

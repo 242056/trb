@@ -60,8 +60,8 @@ class Settings(BaseSettings):
 
     ocr_text_threshold: int = 200
     ocr_enabled: bool = True
-    # tesseract | paddle | yandex  (публичного SberOCR API нет)
-    ocr_engine: str = "paddle"
+    # tesseract | paddle | yandex  (в Docker-образе — tesseract+rus)
+    ocr_engine: str = "tesseract"
     yandex_vision_api_key: str = ""
     yandex_vision_iam_token: str = ""
 

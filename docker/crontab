@@ -1,10 +1,10 @@
 # Static fallback crontab (prod uses docker/cron-entrypoint.sh → render from env).
-# Defaults match CRON_*_SCHEDULE in .env.example.
-# Daily pipeline
-0 8 * * * /usr/local/bin/explainlaw daily
-# Weekly digest → export + Telegram
-0 9 * * 1 /usr/local/bin/explainlaw daily --weekly-publish
+# Defaults match CRON_*_SCHEDULE + pipeline limits in .env.example.
+# Daily pipeline (always with process limit — без лимита тонет в бэклоге)
+0 8 * * * /app/docker/cron-run.sh /usr/local/bin/explainlaw daily --process-limit 50 --fetch-missing 3
+# Weekly digest → Telegram (без повторного daily/process)
+0 9 * * 1 /app/docker/cron-run.sh /usr/local/bin/explainlaw publish --mark-published
 # Delta / PDF backfill
-0 3 * * 0 /usr/local/bin/explainlaw rebuild-deltas --resume --limit 500
-# Health + Telegram alerts (раз в сутки)
-0 10 * * * /usr/local/bin/explainlaw health --alert
+0 3 * * 0 /app/docker/cron-run.sh /usr/local/bin/explainlaw rebuild-deltas --resume --limit 500
+# Health + Telegram alerts
+0 10 * * * /app/docker/cron-run.sh /usr/local/bin/explainlaw health --alert
