@@ -11,20 +11,31 @@ from explainlaw.content.scoring import ScoredCard
 from explainlaw.db.models import NpaDocument, NpaEnactment, PostBank, PostItem, PostStatus, PostType
 
 
-def _week_bounds(today: date) -> tuple[date, date]:
+def _current_week_bounds(today: date) -> tuple[date, date]:
+    """Текущая календарная неделя (пн–вс), для «вступает в силу»."""
     start = today - timedelta(days=today.weekday())
     end = start + timedelta(days=6)
     return start, end
 
 
+def _past_week_bounds(today: date) -> tuple[date, date]:
+    """Прошедшая календарная неделя (пн–вс до текущего понедельника)."""
+    this_monday = today - timedelta(days=today.weekday())
+    start = this_monday - timedelta(days=7)
+    end = this_monday - timedelta(days=1)
+    return start, end
+
+
 def build_digest_content(cards: list[ScoredCard], *, week_label: str) -> str:
+    from explainlaw.gates.text_checks import reflow_soft_linebreaks
+
     lines = [f"Еженедельный дайджест законодательных изменений ({week_label})", ""]
     for idx, card in enumerate(cards, start=1):
         doc = card.document
         num = doc.number or "—"
         title = (doc.name or doc.eo_number)[:120]
         lines.append(f"{idx}. №{num} — {title}")
-        lines.append(card.card.content.strip())
+        lines.append(reflow_soft_linebreaks(card.card.content.strip()))
         if doc.source_url:
             lines.append(f"Источник: {doc.source_url}")
         lines.append("")
@@ -42,7 +53,7 @@ def create_digest_post(
         return None
 
     today = today or date.today()
-    week_start, week_end = _week_bounds(today)
+    week_start, week_end = _past_week_bounds(today)
     week_label = f"{week_start.isoformat()} — {week_end.isoformat()}"
     title = f"Дайджест ФЗ ({week_start.strftime('%d.%m')}–{week_end.strftime('%d.%m.%Y')})"
     if post_type == PostType.mini_digest:
@@ -70,7 +81,7 @@ def create_digest_post(
 def build_enactment_week_post(session: Session, *, today: date | None = None) -> PostBank | None:
     """Запасной формат: что вступает в силу на этой неделе."""
     today = today or date.today()
-    week_start, week_end = _week_bounds(today)
+    week_start, week_end = _current_week_bounds(today)
 
     rows = session.execute(
         select(NpaEnactment, NpaDocument)

@@ -39,15 +39,15 @@ def send_telegram_text(text: str, *, parse_mode: str | None = "HTML") -> bool:
 
 def format_post_for_telegram(*, title: str, content: str) -> str:
     """Читаемый пост для группы: заголовок + тело + кликабельные ссылки."""
-    body = (content or "").strip()
+    from explainlaw.gates.text_checks import reflow_soft_linebreaks
+
+    body = reflow_soft_linebreaks((content or "").strip())
     # «Источник: url» → кликабельная ссылка
     body = re.sub(
         r"(?m)^Источник:\s+(https?://\S+)\s*$",
         r'🔗 <a href="\1">Источник</a>',
         escape(body),
     )
-    # переносы сохраняем
-    body = body.replace("\n", "\n")
     head = f"<b>{escape(title.strip())}</b>" if title else "<b>ExplainLaw</b>"
     return f"{head}\n\n{body}"
 

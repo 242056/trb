@@ -46,6 +46,82 @@ def normalize_whitespace(text: str) -> str:
     return re.sub(r"\s+", " ", text.strip())
 
 
+# Однострочные маркеры дайджеста (не тянут продолжение со следующих строк)
+_STANDALONE_LINE_RE = re.compile(
+    r"^(?:"
+    r"\d+\.\s|"
+    r"Источник:|"
+    r"Изменения:|"
+    r"Еженедельный|"
+    r"Вступает в силу|"
+    r"🔗|"
+    r"<"
+    r")"
+)
+# Маркеры, у которых OCR часто рвёт продолжение на следующие строки
+_CONTINUE_LINE_RE = re.compile(r"^•")
+
+_QUOTE_START_RE = re.compile(r"[«\"„]")
+
+
+def reflow_soft_linebreaks(text: str) -> str:
+    """Склеивает PDF/OCR soft-wraps; сохраняет абзацы и структурные маркеры."""
+    if not text:
+        return ""
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = re.sub(r"(?<=\w)-\n(?=\w)", "", text)
+
+    out: list[str] = []
+    current: list[str] = []
+    allow_continue = False
+
+    def flush() -> None:
+        nonlocal allow_continue
+        if current:
+            out.append(normalize_whitespace(" ".join(current)))
+            current.clear()
+        allow_continue = False
+
+    for raw in text.split("\n"):
+        line = raw.strip()
+        if not line:
+            flush()
+            if out and out[-1] != "":
+                out.append("")
+            continue
+        # номера страниц / одиночный мусор OCR
+        if re.fullmatch(r"\d{1,3}", line):
+            continue
+        if _STANDALONE_LINE_RE.match(line):
+            flush()
+            out.append(line)
+        elif _CONTINUE_LINE_RE.match(line):
+            flush()
+            current.append(line)
+            allow_continue = True
+        elif allow_continue or current:
+            current.append(line)
+        else:
+            current.append(line)
+    flush()
+
+    cleaned: list[str] = []
+    for line in out:
+        if line == "" and cleaned and cleaned[-1] == "":
+            continue
+        cleaned.append(line)
+    return "\n".join(cleaned).strip()
+
+
+def clean_quote_snippet(text: str, *, max_len: int = 200) -> str:
+    """Текст цитаты для карточки: reflow + обрезка мусора до открывающей кавычки."""
+    text = reflow_soft_linebreaks(text or "")
+    match = _QUOTE_START_RE.search(text[:80])
+    if match:
+        text = text[match.start() :]
+    return text[:max_len].strip()
+
+
 def verify_quote_in_source(text_after: str | None, source_text: str) -> bool:
     if not text_after or len(text_after) < _QUOTE_MIN_LEN:
         return False

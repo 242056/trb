@@ -61,11 +61,13 @@ def _qwen_client():
 
 
 def _regex_extract(fragment: str) -> list[NormChangeDraft]:
+    from explainlaw.gates.text_checks import reflow_soft_linebreaks
+
     drafts: list[NormChangeDraft] = []
     for match in _FULL_REDACTION_RE.finditer(fragment):
         article = match.group(1)
         after_start = match.end()
-        text_after = fragment[after_start : after_start + 2000].strip()
+        text_after = reflow_soft_linebreaks(fragment[after_start : after_start + 2000])
         drafts.append(
             NormChangeDraft(
                 unit_address={"статья": article},
@@ -89,7 +91,7 @@ def _regex_extract(fragment: str) -> list[NormChangeDraft]:
                 unit_address={"статья": article},
                 operation_type=OperationType.full_redaction,
                 apply_kind=ApplyKind.full_redaction,
-                text_after=inline.group(1).strip() or None,
+                text_after=reflow_soft_linebreaks(inline.group(1)) or None,
                 effective_date=None,
             )
         )

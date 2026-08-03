@@ -1,5 +1,4 @@
 import logging
-import re
 from dataclasses import dataclass
 
 import fitz
@@ -19,9 +18,10 @@ class ExtractionResult:
 
 
 def _normalize_text(text: str) -> str:
-    text = text.replace("\r\n", "\n").replace("\r", "\n")
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    return text.strip()
+    from explainlaw.gates.text_checks import reflow_soft_linebreaks
+
+    # PDF/OCR часто даёт soft-wrap по словам («Сторонами\\nконцессионного»).
+    return reflow_soft_linebreaks(text)
 
 
 def extract_text_from_pdf(pdf_bytes: bytes) -> ExtractionResult:
