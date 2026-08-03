@@ -33,7 +33,7 @@ COPY scripts ./scripts
 COPY docker ./docker
 
 RUN pip install --no-cache-dir -e ".[ocr]" \
-    && chmod +x /app/docker/cron-entrypoint.sh \
+    && chmod +x /app/docker/cron-entrypoint.sh /app/docker/cron-run.sh \
     && test -x /usr/local/bin/explainlaw
 
 ENV PYTHONUNBUFFERED=1 \

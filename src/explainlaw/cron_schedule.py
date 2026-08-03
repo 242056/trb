@@ -15,22 +15,25 @@ def render_crontab(settings: Settings | None = None) -> str:
         settings = Settings()
 
     bin_path = os.environ.get("EXPLAINLAW_BIN", EXPLAINLAW_DEFAULT)
+    wrapper = os.environ.get("CRON_RUN_WRAPPER", "/app/docker/cron-run.sh")
     lines: list[str] = [
         f"# Generated crontab (TZ hint: {settings.cron_timezone})",
         "# Times are interpreted in the container timezone (set TZ env).",
+        f"# Job stdout/stderr also appended to {os.environ.get('CRON_LOG_PATH', '/app/logs/cron.log')}",
     ]
 
+    # Без лимита daily/weekly тонут в бэклоге process и не доходят до publish.
     process_limit = settings.pipeline_process_limit
+    if process_limit is None:
+        process_limit = 50
     fetch_missing = settings.pipeline_fetch_missing_limit
     backfill_limit = settings.pipeline_backfill_limit
 
-    daily_args = ["daily"]
-    if process_limit is not None:
-        daily_args += ["--process-limit", str(process_limit)]
-    daily_args += ["--fetch-missing", str(fetch_missing)]
+    daily_args = ["daily", "--process-limit", str(process_limit), "--fetch-missing", str(fetch_missing)]
     daily_cmd = " ".join([bin_path, *daily_args])
 
-    weekly_cmd = f"{daily_cmd} --weekly-publish"
+    # Пн: только публикация дайджеста (без повторного тяжёлого process).
+    weekly_cmd = f"{bin_path} publish --mark-published"
     backfill_cmd = f"{bin_path} rebuild-deltas --resume --limit {backfill_limit}"
     health_cmd = f"{bin_path} health --alert"
 
@@ -65,6 +68,6 @@ def render_crontab(settings: Settings | None = None) -> str:
             lines.append(f"# skipped empty schedule: {comment}")
             continue
         lines.append(f"# {comment}")
-        lines.append(f"{schedule} {command}")
+        lines.append(f"{schedule} {wrapper} {command}")
 
     return "\n".join(lines) + "\n"

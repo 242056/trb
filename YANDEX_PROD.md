@@ -42,7 +42,10 @@ sudo docker compose up -d --build
 sudo docker compose ps
 curl -s http://127.0.0.1:7000/health
 sudo docker compose exec app explainlaw status
+# логи cron-контейнера (не app — там только /health)
 sudo docker compose logs -f cron
+# файл логов job (volume app_logs):
+sudo docker compose exec cron tail -f /app/logs/cron.log
 ```
 
 Миграции (один раз):
@@ -96,7 +99,7 @@ CA Kafka: положите сертификат в `./certs` и раскомме
 | Env | По умолчанию | Команда |
 |-----|--------------|---------|
 | `CRON_DAILY_SCHEDULE` | `0 8 * * *` | `explainlaw daily` |
-| `CRON_WEEKLY_SCHEDULE` | `0 9 * * 1` | `daily --weekly-publish` (+ Telegram) |
+| `CRON_WEEKLY_SCHEDULE` | `0 9 * * 1` | `publish --mark-published` (дайджест → Telegram) |
 | `CRON_BACKFILL_SCHEDULE` | `0 3 * * 0` | `rebuild-deltas --resume` |
 | `CRON_HEALTH_SCHEDULE` | `0 10 * * *` | `health --alert` (1 раз/сутки) |
 
@@ -127,8 +130,8 @@ sudo docker compose logs -f cron
 
 ```bash
 sudo docker compose exec app explainlaw prod-smoke
-# или полный weekly:
-sudo docker compose exec app explainlaw daily --weekly-publish
+# или только дайджест в Telegram:
+sudo docker compose exec app explainlaw publish --mark-published
 ```
 
 После проверки выключите `CRON_RUN_ON_START=false`, иначе при каждом рестарте контейнера снова уйдёт дайджест.

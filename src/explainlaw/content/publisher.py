@@ -7,6 +7,7 @@ import logging
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -80,27 +81,34 @@ class WeeklyPublisher:
             stats.reserve_ready_count = self._count_ready_posts()
             return stats
 
-        post: PostBank | None = None
-        if len(selected) >= min_items:
-            post = create_digest_post(self._session, selected, today=today, post_type=PostType.digest)
-            stats.digest_type = PostType.digest.value
-        elif selected:
-            post = create_digest_post(
-                self._session, selected, today=today, post_type=PostType.mini_digest
-            )
-            stats.digest_type = PostType.mini_digest.value
-        else:
-            post = build_enactment_week_post(self._session, today=today)
-            if post:
-                stats.fallback_created = True
-                stats.fallback_post_id = post.id
-                stats.digest_type = PostType.enactment_week.value
-                self._publish_kafka(post.id, post.post_type.value)
+        # Уже собранный сегодня ready-дайджест не дублируем (повтор weekly / ручной retry).
+        post = self._ready_digest_today(today)
+        reused = post is not None
+        if post is None:
+            if len(selected) >= min_items:
+                post = create_digest_post(
+                    self._session, selected, today=today, post_type=PostType.digest
+                )
+                stats.digest_type = PostType.digest.value
+            elif selected:
+                post = create_digest_post(
+                    self._session, selected, today=today, post_type=PostType.mini_digest
+                )
+                stats.digest_type = PostType.mini_digest.value
+            else:
+                post = build_enactment_week_post(self._session, today=today)
+                if post:
+                    stats.fallback_created = True
+                    stats.fallback_post_id = post.id
+                    stats.digest_type = PostType.enactment_week.value
+                    self._publish_kafka(post.id, post.post_type.value)
 
         if post and not stats.fallback_created:
-            stats.digest_created = True
+            stats.digest_created = not reused
             stats.digest_post_id = post.id
-            self._publish_kafka(post.id, post.post_type.value)
+            stats.digest_type = stats.digest_type or post.post_type.value
+            if not reused:
+                self._publish_kafka(post.id, post.post_type.value)
 
         stats.reserve_ready_count = self._count_ready_posts()
         if stats.reserve_ready_count < settings.post_reserve_count:
@@ -112,10 +120,19 @@ class WeeklyPublisher:
                 stats.reserve_ready_count = self._count_ready_posts()
 
         if mark_published:
-            stats.published_count = self._mark_ready_as_published(limit=1)
-            if stats.published_count:
-                stats.export_path = self._export_published(limit=1)
-                stats.telegram_sent = self._send_published_to_telegram(limit=1)
+            # Публикуем именно созданный дайджест/fallback, а не самый старый ready.
+            target = post
+            if target is None:
+                target = self._oldest_ready_post()
+            if target is not None:
+                self._mark_post_published(target)
+                stats.published_count = 1
+                if stats.digest_post_id is None:
+                    stats.digest_post_id = target.id
+                if stats.digest_type is None:
+                    stats.digest_type = target.post_type.value
+                stats.export_path = self._export_post(target)
+                stats.telegram_sent = self._send_post_to_telegram(target)
 
         self._session.commit()
         return stats
@@ -127,71 +144,65 @@ class WeeklyPublisher:
             .where(PostBank.status == PostStatus.ready)
         ).scalar_one()
 
-    def _mark_ready_as_published(self, *, limit: int = 1) -> int:
-        posts = self._session.execute(
+    def _ready_digest_today(self, today: date) -> PostBank | None:
+        day_start = datetime(
+            today.year, today.month, today.day, tzinfo=ZoneInfo("Europe/Moscow")
+        )
+        return self._session.execute(
+            select(PostBank)
+            .where(
+                PostBank.status == PostStatus.ready,
+                PostBank.post_type.in_([PostType.digest, PostType.mini_digest]),
+                PostBank.created_at >= day_start,
+            )
+            .order_by(PostBank.id.desc())
+            .limit(1)
+        ).scalar_one_or_none()
+
+    def _oldest_ready_post(self) -> PostBank | None:
+        return self._session.execute(
             select(PostBank)
             .where(PostBank.status == PostStatus.ready)
-            .order_by(PostBank.created_at)
-            .limit(limit)
-        ).scalars().all()
-        now = datetime.now(timezone.utc)
-        for post in posts:
-            post.status = PostStatus.published
-            post.published_at = now
-        return len(posts)
+            .order_by(PostBank.created_at.asc())
+            .limit(1)
+        ).scalar_one_or_none()
 
-    def _export_published(self, *, limit: int = 1) -> str | None:
-        """Экспорт опубликованных постов в PUBLISH_EXPORT_DIR для ручной выкладки."""
-        posts = self._session.execute(
-            select(PostBank)
-            .where(PostBank.status == PostStatus.published)
-            .order_by(PostBank.published_at.desc())
-            .limit(limit)
-        ).scalars().all()
-        if not posts:
-            return None
+    def _mark_post_published(self, post: PostBank) -> None:
+        post.status = PostStatus.published
+        post.published_at = datetime.now(timezone.utc)
+        self._session.flush()
 
+    def _export_post(self, post: PostBank) -> str | None:
+        """Экспорт одного поста в PUBLISH_EXPORT_DIR."""
         out_dir = Path(settings.publish_export_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
-        last_path: str | None = None
-        for post in posts:
-            stamp = (post.published_at or datetime.now(timezone.utc)).strftime("%Y%m%d_%H%M%S")
-            path = out_dir / f"post_{post.id}_{stamp}.md"
-            body = f"# {post.title}\n\n{post.content}\n"
-            path.write_text(body, encoding="utf-8")
-            meta = {
-                "post_id": post.id,
-                "post_type": post.post_type.value,
-                "title": post.title,
-                "published_at": post.published_at.isoformat() if post.published_at else None,
-            }
-            path.with_suffix(".json").write_text(
-                json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
-            )
-            last_path = str(path)
-            logger.info("Экспорт публикации: %s", path)
-        return last_path
+        stamp = (post.published_at or datetime.now(timezone.utc)).strftime("%Y%m%d_%H%M%S")
+        path = out_dir / f"post_{post.id}_{stamp}.md"
+        body = f"# {post.title}\n\n{post.content}\n"
+        path.write_text(body, encoding="utf-8")
+        meta = {
+            "post_id": post.id,
+            "post_type": post.post_type.value,
+            "title": post.title,
+            "published_at": post.published_at.isoformat() if post.published_at else None,
+        }
+        path.with_suffix(".json").write_text(
+            json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        logger.info("Экспорт публикации: %s", path)
+        return str(path)
 
-    def _send_published_to_telegram(self, *, limit: int = 1) -> bool:
+    def _send_post_to_telegram(self, post: PostBank) -> bool:
         if not settings.telegram_publish:
             return False
         from explainlaw.messaging.telegram import format_post_for_telegram, send_telegram_text
 
-        posts = self._session.execute(
-            select(PostBank)
-            .where(PostBank.status == PostStatus.published)
-            .order_by(PostBank.published_at.desc())
-            .limit(limit)
-        ).scalars().all()
-        sent = False
-        for post in posts:
-            text = format_post_for_telegram(title=post.title, content=post.content)
-            if send_telegram_text(text):
-                sent = True
-                logger.info("Дайджест отправлен в Telegram (post_id=%s)", post.id)
-            else:
-                logger.warning("Не удалось отправить post_id=%s в Telegram", post.id)
-        return sent
+        text = format_post_for_telegram(title=post.title, content=post.content)
+        if send_telegram_text(text):
+            logger.info("Дайджест отправлен в Telegram (post_id=%s)", post.id)
+            return True
+        logger.warning("Не удалось отправить post_id=%s в Telegram", post.id)
+        return False
 
     def _publish_kafka(self, post_id: int, post_type: str) -> None:
         if self._kafka is None:
