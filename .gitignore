@@ -6,7 +6,6 @@ dist/
 build/
 .eggs/
 .env
-.env.yandex.local
 .venv/
 venv/
 .idea/
@@ -14,14 +13,8 @@ venv/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
-*.sql
-*.dump
-*.tar.gz
-minio_data.tar.gz
-minio_restore/
-minio_data/
-bin/
-.DS_Store
-**/.DS_Store
+.sql
+.dump
+.tar.gz
 logs/
 collect-all.log

@@ -194,9 +194,38 @@ def send_telegram_alert(health: dict[str, Any]) -> bool:
     return ok
 
 
-def send_alerts(health: dict[str, Any]) -> bool:
-    """Файл-лог + webhook + Telegram при проблемах. Возвращает True если что-то ушло наружу."""
+def send_telegram_heartbeat(health: dict[str, Any]) -> bool:
+    """Ежедневный OK-ping в Telegram, когда проблем нет (проверка канала)."""
+    if not settings.alert_telegram_heartbeat:
+        return False
+    if not health.get("healthy"):
+        return False
+    if not _telegram_alert_budget_remaining():
+        logger.info(
+            "Telegram-heartbeat пропущен: лимит %s/сутки уже исчерпан",
+            settings.alert_telegram_max_per_day,
+        )
+        return False
+    from explainlaw.messaging.telegram import send_telegram_text
+
+    collect_at = (health.get("last_collect") or {}).get("at") or "—"
+    daily_at = (health.get("last_daily") or {}).get("at") or "—"
+    text = (
+        "✅ <b>ExplainLaw</b> OK\n"
+        f"collect: {collect_at}\n"
+        f"daily: {daily_at}"
+    )
+    ok = send_telegram_text(text)
+    if ok:
+        _record_telegram_alert_sent()
+    return ok
+
+
+def send_alerts(health: dict[str, Any], *, allow_heartbeat: bool = False) -> bool:
+    """Файл-лог + webhook + Telegram (проблема; OK-heartbeat только из health --alert)."""
     if health.get("healthy"):
+        if allow_heartbeat:
+            return send_telegram_heartbeat(health)
         return False
     _append_alert_log(health)
     sent_webhook = send_alert_webhook(health)

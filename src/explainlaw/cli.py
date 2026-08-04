@@ -247,7 +247,7 @@ def cmd_health(args: argparse.Namespace) -> int:
     with SessionLocal() as session:
         health = check_health(session)
         if args.alert:
-            health["alert_sent"] = send_alerts(health)
+            health["alert_sent"] = send_alerts(health, allow_heartbeat=True)
 
     print(json.dumps(health, ensure_ascii=False, indent=2))
     return 0 if health.get("healthy") else 1
@@ -518,7 +518,11 @@ def main() -> None:
     p_smoke.set_defaults(func=cmd_prod_smoke)
 
     p_health = sub.add_parser("health", help="Проверка здоровья конвейера и алерты (§11)")
-    p_health.add_argument("--alert", action="store_true", help="Отправить webhook при проблемах")
+    p_health.add_argument(
+        "--alert",
+        action="store_true",
+        help="Telegram/webhook: при проблемах — алерт, иначе утренний OK-heartbeat",
+    )
     p_health.set_defaults(func=cmd_health)
 
     p_status = sub.add_parser("status", help="Сколько ФЗ в API, в БД, ожидают обработки")

@@ -6,5 +6,5 @@
 0 9 * * 1 /app/docker/cron-run.sh /usr/local/bin/explainlaw publish --mark-published
 # Delta / PDF backfill
 0 3 * * 0 /app/docker/cron-run.sh /usr/local/bin/explainlaw rebuild-deltas --resume --limit 500
-# Health + Telegram alerts
-0 10 * * * /app/docker/cron-run.sh /usr/local/bin/explainlaw health --alert
+# Health + Telegram alert/heartbeat (утром после daily)
+30 8 * * * /app/docker/cron-run.sh /usr/local/bin/explainlaw health --alert

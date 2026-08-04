@@ -1,23 +1,23 @@
 # ExplainLaw — отчёт о работе и передача на прод
 
-**Версия:** 0.2.0  
-**Дата:** 2026-07-18  
+**Версия:** 0.1.0  
+**Дата:** 2026-07-01  
 **ТЗ:** `rule.md` (Шаг 0 + Шаг 1)  
-**Репозиторий:** `trb` / пакет `explainlaw`  
-**Прод-инфра:** см. `YANDEX_PROD.md` (VPS выведен; Yandex PG + Kafka + MinIO)
+**Репозиторий:** `trb` / пакет `explainlaw`
 
 ---
 
 ## 1. Резюме
 
-ExplainLaw — конвейер ежедневного сбора федеральных законов с `publication.pravo.gov.ru`, извлечения текста из PDF (включая TIFF-ZIP → PDF), построения дельт изменений, ИИ-сводок, двух гейтов качества и еженедельной публикации из «банка готовых карточек».
+ExplainLaw — конвейер ежедневного сбора федеральных законов с `publication.pravo.gov.ru`, извлечения текста из PDF, построения дельт изменений, ИИ-сводок, двух гейтов качества и еженедельной публикации из «банка готовых карточек».
 
-**Код подготовлен к проду без VPS:** Yandex Managed PG/Kafka, OCR (paddle/tesseract/yandex), TIFF-ZIP, `rebuild-deltas --resume`, алерты (webhook/Telegram/jsonl), экспорт дайджеста с `source_url`, cron `*_prod.sh`.
+**Архитектура и код готовы к проду на ~85%.** Инфраструктура (PostgreSQL, MinIO, Kafka), CLI, cron-скрипты, наблюдаемость и полный каталог ФЗ (~7761) — на месте.
 
-**Операционные блокеры при переносе:**
-1. Пересоздать MinIO / восстановить PDF-бэкап (старый VPS недоступен).
-2. Подключить Qwen через Kafka (`LLM_TRANSPORT=kafka`) и Gateway для сводок.
-3. Выставить cron: `./scripts/install-cron.sh --prod`.
+**Главный блокер продуктового масштаба:** не развёрнуты LLM:
+- **Qwen3 8B** (локально) — извлечение norm events и дельт;
+- **Gateway** (облако) — публичные сводки и семантический гейт №2.
+
+Без моделей база наполнена метаданными и текстами; дельт — 5 из 6572 поправок (regex-only).
 
 ---
 
@@ -60,7 +60,7 @@ npa_raw       npa_summary post_bank
 | `daily` | Полный ежедневный конвейер |
 | `health` | Здоровье + алерты |
 | `status` | Метрики заполнения БД |
-| `serve` | FastAPI веб-интерфейс (:7000) |
+| `serve` | FastAPI веб-интерфейс (:8000) |
 
 ### 2.3. Ключевые модули
 
@@ -323,7 +323,7 @@ chmod +x scripts/*.sh
 ./scripts/install-cron.sh
 
 # 9. Веб (опционально)
-explainlaw serve --host 0.0.0.0 --port 7000
+explainlaw serve --host 0.0.0.0 --port 8000
 ```
 
 ### 5.3. Перенос существующей БД и MinIO (с dev-машины на прод)
@@ -522,7 +522,7 @@ explainlaw publish
 | Журнал запусков | `SELECT * FROM pipeline_run ORDER BY started_at DESC` |
 | Логи cron | `/var/log/explainlaw-daily.log` или `$ROOT/logs/` |
 | MinIO console | `http://<host>:9001` |
-| Веб-UI | `explainlaw serve` → `http://<host>:7000` |
+| Веб-UI | `explainlaw serve` → `http://<host>:8000` |
 
 ---
 

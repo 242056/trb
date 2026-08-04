@@ -15,7 +15,6 @@ dependencies = [
     "fastapi>=0.111",
     "uvicorn[standard]>=0.29",
     "pymupdf>=1.24",
-    "Pillow>=10.0",
 ]
 
 [project.scripts]
@@ -29,10 +28,7 @@ dev = [
 ocr = [
     "pytesseract>=0.3",
     "pdf2image>=1.17",
-]
-paddle = [
-    "paddlepaddle>=2.6",
-    "paddleocr>=2.7",
+    "Pillow>=10.0",
 ]
 
 [build-system]

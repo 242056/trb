@@ -12,7 +12,7 @@ def test_render_crontab_defaults():
     assert "health --alert" in text
     assert "0 8 * * *" in text
     assert "0 9 * * 1" in text
-    assert "0 10 * * *" in text
+    assert "30 8 * * *" in text
     # weekly больше не гоняет тяжёлый daily --weekly-publish
     assert "--weekly-publish" not in text
 

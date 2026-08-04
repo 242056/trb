@@ -106,9 +106,9 @@ CRON_RUN_ON_START=false
 | Когда (MSK) | Команда |
 |-------------|---------|
 | каждый день 08:00 | `daily --process-limit 50 --fetch-missing 3` |
+| каждый день 08:30 | `health --alert` (проблема **или** утренний OK в Telegram) |
 | пн 09:00 | `publish --mark-published` (дайджест **за прошедшую** пн–вс → Telegram) |
 | вс 03:00 | `rebuild-deltas --resume --limit 500` |
-| каждый день 10:00 | `health --alert` |
 
 Проверка crontab внутри контейнера:
 
