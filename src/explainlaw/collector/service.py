@@ -27,6 +27,8 @@ class CollectStats:
     no_pdf: int = 0
     errors: int = 0
     error_details: list[str] = field(default_factory=list)
+    date_from: str | None = None
+    date_to: str | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -36,7 +38,25 @@ class CollectStats:
             "no_pdf": self.no_pdf,
             "errors": self.errors,
             "error_details": self.error_details,
+            "date_from": self.date_from,
+            "date_to": self.date_to,
         }
+
+
+def collect_window(
+    *,
+    anchor: date | None = None,
+    lookback_days: int | None = None,
+) -> tuple[date, date]:
+    """Окно ежедневного сбора: [anchor − lookback, anchor].
+
+    Cron в 08:00 MSK с lookback=1 → вчера+сегодня: догоняет ФЗ,
+    опубликованные после вчерашнего утреннего прогона (гранулярность API — день).
+    """
+    end = anchor or date.today()
+    lookback = settings.collect_lookback_days if lookback_days is None else lookback_days
+    start = end - timedelta(days=max(0, int(lookback)))
+    return start, end
 
 
 class DailyCollector:
@@ -123,7 +143,10 @@ class DailyCollector:
         if date_from > date_to:
             date_from, date_to = date_to, date_from
 
-        stats = CollectStats()
+        stats = CollectStats(
+            date_from=date_from.isoformat(),
+            date_to=date_to.isoformat(),
+        )
         sync_reference_data(self._session, self._pravo)
         fz_type_id = self._pravo.resolve_fz_type_id()
 

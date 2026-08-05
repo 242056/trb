@@ -96,6 +96,9 @@ class Settings(BaseSettings):
     pipeline_backfill_pdf_limit: int | None = None
     # Период сбора, если daily без --date (daily|weekly|monthly) — для collect CLI
     collect_period_type: str = "daily"
+    # Daily collect: сколько календарных дней назад от якоря (08:00 → вчера+сегодня).
+    # У портала гранулярность — день, окно ≈ с 08:00 вчера по 08:00 сегодня.
+    collect_lookback_days: int = 1
 
     # --- Cron (Docker supercronic; расписание и флаги из env) ---
     cron_timezone: str = "Europe/Moscow"
