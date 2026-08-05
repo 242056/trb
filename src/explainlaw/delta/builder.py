@@ -18,13 +18,7 @@ from explainlaw.db.models import (
 )
 from explainlaw.extraction.act_identifier import find_document_by_identifier
 from explainlaw.extraction.article_text import extract_article_text
-
-
-def _verify_quote_in_source(text_after: str | None, source_text: str) -> bool:
-    if not text_after or len(text_after) < 30:
-        return False
-    sample = text_after[:120].strip()
-    return sample in source_text
+from explainlaw.gates.text_checks import verify_quote_in_source
 
 
 def build_delta_for_document(session: Session, doc: NpaDocument, source_text: str) -> NpaDelta | None:
@@ -66,7 +60,7 @@ def build_delta_for_document(session: Session, doc: NpaDocument, source_text: st
         else:
             has_partial = True
 
-        quote_ok = _verify_quote_in_source(event.text_after, source_text)
+        quote_ok = verify_quote_in_source(event.text_after, source_text)
 
         changes.append(
             {

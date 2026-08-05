@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
+from datetime import date
 
 from sqlalchemy import delete, or_, select
 from sqlalchemy.orm import Session, selectinload
@@ -56,11 +57,13 @@ class GateRunner:
         kafka_producer=None,
         force: bool = False,
         amendments_only: bool = False,
+        publish_date: date | None = None,
     ) -> None:
         self._session = session
         self._kafka = kafka_producer
         self._force = force
         self._amendments_only = amendments_only
+        self._publish_date = publish_date
 
     def run(self, *, limit: int | None = None) -> GateRunStats:
         stats = GateRunStats()
@@ -117,6 +120,8 @@ class GateRunner:
             )
             stmt = stmt.where(~NpaDocument.name.ilike("%О ратификации%"))
             stmt = stmt.where(~NpaDocument.name.ilike("%О принятии Протокола%"))
+        if self._publish_date is not None:
+            stmt = stmt.where(NpaDocument.publish_date_short == self._publish_date)
         if limit:
             stmt = stmt.limit(limit)
         return list(self._session.execute(stmt).scalars().unique().all())

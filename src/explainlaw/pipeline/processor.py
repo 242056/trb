@@ -1,6 +1,7 @@
 import json
 import logging
 from dataclasses import dataclass, field
+from datetime import date
 
 from sqlalchemy import delete, exists, or_, select
 from sqlalchemy.orm import Session, selectinload
@@ -92,6 +93,7 @@ class DocumentProcessor:
         rebuild_deltas_only: bool = False,
         resume: bool = False,
         min_text_chars: int = 200,
+        publish_date: date | None = None,
     ) -> None:
         self._session = session
         self._storage = storage
@@ -101,6 +103,7 @@ class DocumentProcessor:
         self._rebuild_deltas_only = rebuild_deltas_only
         self._resume = resume
         self._min_text_chars = min_text_chars
+        self._publish_date = publish_date
 
     def process(self, *, limit: int | None = None) -> ProcessStats:
         stats = ProcessStats()
@@ -189,6 +192,8 @@ class DocumentProcessor:
                 stmt = stmt.outerjoin(NpaDelta, NpaDelta.document_id == NpaDocument.id).where(
                     NpaDelta.id.is_(None)
                 )
+            if self._publish_date is not None:
+                stmt = stmt.where(NpaDocument.publish_date_short == self._publish_date)
             if limit:
                 stmt = stmt.limit(limit)
             return list(self._session.execute(stmt).scalars().unique().all())
@@ -216,6 +221,8 @@ class DocumentProcessor:
                 NpaDocument.publish_date_short.desc(),
             )
         )
+        if self._publish_date is not None:
+            stmt = stmt.where(NpaDocument.publish_date_short == self._publish_date)
         if limit:
             stmt = stmt.limit(limit)
         return list(self._session.execute(stmt).scalars().all())

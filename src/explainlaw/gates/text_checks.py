@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from datetime import date, datetime
 
 _MONTHS = (
     "января",
@@ -62,6 +63,12 @@ _STANDALONE_LINE_RE = re.compile(
 _CONTINUE_LINE_RE = re.compile(r"^•")
 
 _QUOTE_START_RE = re.compile(r"[«\"„]")
+_GUILLEMET_QUOTE_RE = re.compile(r"«([^»]{12,800})»")
+_CLEAN_ARTICLE_RE = re.compile(r"^\d+(?:\.\d+)?$")
+_WORDS_REPLACE_RE = re.compile(
+    r"(?:заменить|дополнить)\s+словами\s*«([^»]{8,800})»",
+    re.IGNORECASE,
+)
 
 
 def reflow_soft_linebreaks(text: str) -> str:
@@ -122,16 +129,117 @@ def clean_quote_snippet(text: str, *, max_len: int = 200) -> str:
     return text[:max_len].strip()
 
 
+def sanitize_article_number(article: str | None) -> str | None:
+    """Только канонический номер статьи (отсекает OCR-мусор вроде 17° / 189%)."""
+    if article is None:
+        return None
+    token = str(article).strip().replace(",", ".")
+    if _CLEAN_ARTICLE_RE.fullmatch(token):
+        return token
+    return None
+
+
+def extract_guillemet_quotes(text: str) -> list[str]:
+    return [m.group(1).strip() for m in _GUILLEMET_QUOTE_RE.finditer(text or "")]
+
+
+def extract_replace_wording_quotes(text: str) -> list[str]:
+    """Цитаты после «заменить/дополнить словами «...»» — типичный address_patch."""
+    return [m.group(1).strip() for m in _WORDS_REPLACE_RE.finditer(text or "")]
+
+
+def date_format_variants(value: date | datetime | str | None) -> list[str]:
+    """Варианты даты для корпуса заземления сводки (ISO / DD.MM.YYYY / «D месяца YYYY»)."""
+    if value is None:
+        return []
+    if isinstance(value, datetime):
+        value = value.date()
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return []
+        try:
+            if "T" in raw:
+                value = datetime.fromisoformat(raw.replace("Z", "+00:00")).date()
+            else:
+                value = date.fromisoformat(raw[:10])
+        except ValueError:
+            return [raw]
+
+    variants = [
+        value.isoformat(),
+        value.strftime("%d.%m.%Y"),
+        f"{value.day:02d}.{value.month:02d}.{value.year}",
+        f"{value.day}.{value.month:02d}.{value.year}",
+        f"{value.day}.{value.month}.{value.year}",
+        f"{value.day} {_MONTHS[value.month - 1]} {value.year}",
+    ]
+    # без ведущего нуля в дне для DD.MM
+    variants.append(f"{value.day:02d}.{value.month}.{value.year}")
+    # uniq preserve order
+    seen: set[str] = set()
+    out: list[str] = []
+    for item in variants:
+        key = item.lower()
+        if key not in seen:
+            seen.add(key)
+            out.append(item)
+    return out
+
+
 def verify_quote_in_source(text_after: str | None, source_text: str) -> bool:
-    if not text_after or len(text_after) < _QUOTE_MIN_LEN:
+    if not text_after:
         return False
-    sample = normalize_whitespace(text_after[:120])
-    normalized_source = normalize_whitespace(source_text)
-    return sample in normalized_source
+    sample = normalize_whitespace(reflow_soft_linebreaks(text_after)[:120])
+    if len(sample) < _QUOTE_MIN_LEN:
+        return False
+    normalized_source = normalize_whitespace(reflow_soft_linebreaks(source_text))
+    if sample in normalized_source:
+        return True
+    # короткие «...» из патча
+    for quote in extract_guillemet_quotes(text_after):
+        q = normalize_whitespace(reflow_soft_linebreaks(quote))
+        if len(q) >= 12 and q in normalized_source:
+            return True
+    for quote in extract_replace_wording_quotes(text_after):
+        q = normalize_whitespace(reflow_soft_linebreaks(quote))
+        if len(q) >= 8 and q in normalized_source:
+            return True
+    return False
+
+
+def ground_text_in_source(text_after: str | None, source_text: str) -> str | None:
+    """Вернуть text_after, дословно присутствующий в источнике, либо None."""
+    if not text_after or not source_text:
+        return None
+    cleaned = reflow_soft_linebreaks(text_after).strip()
+    if not cleaned:
+        return None
+    if verify_quote_in_source(cleaned, source_text):
+        # предпочитаем чистую цитату в кавычках, если она есть и заземлена
+        for quote in extract_replace_wording_quotes(cleaned) or extract_guillemet_quotes(cleaned):
+            if verify_quote_in_source(quote, source_text):
+                return quote
+        return cleaned
+
+    for quote in extract_replace_wording_quotes(source_text):
+        # если LLM склеил мусор — берём дословную цитату из того же фрагмента источника
+        q_norm = normalize_whitespace(quote)
+        c_norm = normalize_whitespace(cleaned)
+        if q_norm in c_norm or c_norm[:40] in q_norm:
+            return quote
+    for quote in extract_guillemet_quotes(source_text):
+        q_norm = normalize_whitespace(quote)
+        if len(q_norm) >= 20 and normalize_whitespace(cleaned)[:40] in q_norm:
+            return quote
+    return None
 
 
 def article_mentioned_in_source(source_text: str, article: str) -> bool:
-    pattern = _ARTICLE_IN_SOURCE_RE.pattern.format(article=re.escape(str(article)))
+    clean = sanitize_article_number(article)
+    if clean is None:
+        return False
+    pattern = _ARTICLE_IN_SOURCE_RE.pattern.format(article=re.escape(clean))
     return re.search(pattern, source_text, re.IGNORECASE) is not None
 
 
@@ -152,17 +260,20 @@ def build_allowed_corpus(
     document_date: str | None,
     name: str | None,
     delta_changes: list[dict],
+    publish_date: str | date | datetime | None = None,
 ) -> str:
-  parts = [number or "", document_date or "", name or ""]
-  for change in delta_changes:
-      parts.append(change.get("text_before") or "")
-      parts.append(change.get("text_after") or "")
-      parts.append(change.get("effective_date") or "")
-      target = change.get("target_act") or {}
-      parts.append(str(target.get("number") or ""))
-      parts.append(str(target.get("date") or ""))
-      parts.append(str(target.get("name") or ""))
-  return normalize_whitespace(" ".join(parts)).lower()
+    parts = [number or "", name or ""]
+    parts.extend(date_format_variants(document_date))
+    parts.extend(date_format_variants(publish_date))
+    for change in delta_changes:
+        parts.append(change.get("text_before") or "")
+        parts.append(change.get("text_after") or "")
+        parts.extend(date_format_variants(change.get("effective_date")))
+        target = change.get("target_act") or {}
+        parts.append(str(target.get("number") or ""))
+        parts.extend(date_format_variants(target.get("date")))
+        parts.append(str(target.get("name") or ""))
+    return normalize_whitespace(" ".join(parts)).lower()
 
 
 def extract_summary_numbers(summary: str) -> list[str]:

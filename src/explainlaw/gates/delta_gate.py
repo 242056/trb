@@ -13,6 +13,7 @@ from explainlaw.gates.text_checks import (
     article_mentioned_in_source,
     count_full_redactions_in_source,
     fz_number_in_source,
+    sanitize_article_number,
     verify_quote_in_source,
 )
 
@@ -102,10 +103,11 @@ def run_delta_gate(
     for idx, change in enumerate(changes):
         apply_kind = change.get("apply_kind")
         unit_address = change.get("unit_address") or {}
-        article = unit_address.get("статья")
+        article = sanitize_article_number(unit_address.get("статья"))
 
+        # OCR/LLM мусор вроде «17°» не считаем адресом статьи
         if apply_kind != "address_patch" and article:
-            if not article_mentioned_in_source(source_text, str(article)):
+            if not article_mentioned_in_source(source_text, article):
                 flags.append(
                     FlagDraft(
                         gate_number=1,
@@ -126,25 +128,14 @@ def run_delta_gate(
             )
 
         text_after = change.get("text_after")
-        if text_after:
-            if apply_kind == "address_patch":
-                sample = text_after[:200].strip()
-                if len(sample) >= 20 and not verify_quote_in_source(sample, source_text):
-                    flags.append(
-                        FlagDraft(
-                            gate_number=1,
-                            flag_type="quote_not_verbatim",
-                            flag_details={"change_index": idx, "sample": sample[:80]},
-                        )
-                    )
-            elif not verify_quote_in_source(text_after, source_text):
-                flags.append(
-                    FlagDraft(
-                        gate_number=1,
-                        flag_type="quote_not_verbatim",
-                        flag_details={"change_index": idx, "sample": text_after[:80]},
-                    )
+        if text_after and not verify_quote_in_source(text_after, source_text):
+            flags.append(
+                FlagDraft(
+                    gate_number=1,
+                    flag_type="quote_not_verbatim",
+                    flag_details={"change_index": idx, "sample": text_after[:80]},
                 )
+            )
 
     if delta.completeness_status == DeltaCompleteness.full:
         source_count = count_full_redactions_in_source(source_text)

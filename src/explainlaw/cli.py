@@ -144,6 +144,7 @@ def cmd_rebuild_deltas(args: argparse.Namespace) -> int:
     """Пересобрать дельты для поправок и прогнать гейты (§8.3)."""
     storage = get_storage()
     resume = getattr(args, "resume", False)
+    publish_date = date.fromisoformat(args.date) if getattr(args, "date", None) else None
     with kafka_producer() as producer, SessionLocal() as session:
         processor = DocumentProcessor(
             session,
@@ -153,6 +154,7 @@ def cmd_rebuild_deltas(args: argparse.Namespace) -> int:
             amendments_only=True,
             rebuild_deltas_only=True,
             resume=resume,
+            publish_date=publish_date,
         )
         process_stats = processor.process(
             limit=args.limit if args.limit is not None else settings.pipeline_backfill_limit
@@ -165,6 +167,7 @@ def cmd_rebuild_deltas(args: argparse.Namespace) -> int:
             kafka_producer=producer,
             force=True,
             amendments_only=True,
+            publish_date=publish_date,
         ).run(limit=args.limit if args.limit is not None else settings.pipeline_backfill_limit)
         record_run(session, job_type=PipelineJobType.gate, metrics=gate_stats.to_dict())
         session.commit()
@@ -464,6 +467,7 @@ def main() -> None:
         help="Пересобрать дельты поправок и прогнать гейты (§8.3)",
     )
     p_rebuild.add_argument("--limit", type=int, help="Обработать не более N поправок")
+    p_rebuild.add_argument("--date", help="Только publish_date_short YYYY-MM-DD")
     p_rebuild.add_argument(
         "--resume",
         action="store_true",
