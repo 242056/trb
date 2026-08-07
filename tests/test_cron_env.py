@@ -11,7 +11,7 @@ def test_render_crontab_defaults():
     assert "rebuild-deltas --resume --limit 500" in text
     assert "# disabled: health + alerts" in text
     assert "0 8 * * *" in text
-    assert "0 9 * * 1" in text
+    assert "0 9 * * *" in text
     # active health job отсутствует
     assert "explainlaw health --alert" not in text
     # weekly больше не гоняет тяжёлый daily --weekly-publish
@@ -40,7 +40,7 @@ def test_render_crontab_custom_schedule_and_limits():
         "*/5 * * * * /app/docker/cron-run.sh /usr/local/bin/explainlaw daily "
         "--process-limit 7 --fetch-missing 2"
     ) in text
-    assert "disabled: weekly" in text
+    assert "disabled: daily digest + Telegram" in text
     assert "rebuild-deltas --resume --limit 10" in text
 
 

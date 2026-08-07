@@ -13,7 +13,11 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from explainlaw.config import settings
-from explainlaw.content.digest import build_enactment_week_post, create_digest_post
+from explainlaw.content.digest import (
+    build_enactment_week_post,
+    build_quiet_day_post,
+    create_digest_post,
+)
 from explainlaw.content.selector import select_cards_for_digest
 from explainlaw.db.models import PostBank, PostStatus, PostType
 from explainlaw.pipeline.topics import TOPIC_POST_READY
@@ -81,7 +85,7 @@ class WeeklyPublisher:
             stats.reserve_ready_count = self._count_ready_posts()
             return stats
 
-        # Уже собранный сегодня ready-дайджест не дублируем (повтор weekly / ручной retry).
+        # Уже собранный сегодня ready-дайджест не дублируем (повтор cron / ручной retry).
         post = self._ready_digest_today(today)
         reused = post is not None
         if post is None:
@@ -96,14 +100,11 @@ class WeeklyPublisher:
                 )
                 stats.digest_type = PostType.mini_digest.value
             else:
-                post = build_enactment_week_post(self._session, today=today)
-                if post:
-                    stats.fallback_created = True
-                    stats.fallback_post_id = post.id
-                    stats.digest_type = PostType.enactment_week.value
-                    self._publish_kafka(post.id, post.post_type.value)
+                # Тихий день: всё равно готовим нормальную сводку в чат.
+                post = build_quiet_day_post(self._session, today=today)
+                stats.digest_type = "quiet_day"
 
-        if post and not stats.fallback_created:
+        if post is not None:
             stats.digest_created = not reused
             stats.digest_post_id = post.id
             stats.digest_type = stats.digest_type or post.post_type.value
@@ -111,7 +112,11 @@ class WeeklyPublisher:
                 self._publish_kafka(post.id, post.post_type.value)
 
         stats.reserve_ready_count = self._count_ready_posts()
-        if stats.reserve_ready_count < settings.post_reserve_count:
+        # Резерв «вступает в силу» — только если мало ready-карточек и это не тихий день.
+        if (
+            stats.digest_type != "quiet_day"
+            and stats.reserve_ready_count < settings.post_reserve_count
+        ):
             fallback = build_enactment_week_post(self._session, today=today)
             if fallback:
                 stats.fallback_created = True
@@ -120,7 +125,7 @@ class WeeklyPublisher:
                 stats.reserve_ready_count = self._count_ready_posts()
 
         if mark_published:
-            # Публикуем именно созданный дайджест/fallback, а не самый старый ready.
+            # Публикуем именно созданный дайджест/тихий день, а не случайный старый ready.
             target = post
             if target is None:
                 target = self._oldest_ready_post()

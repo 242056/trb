@@ -2,13 +2,37 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from explainlaw.content.scoring import ScoredCard
 from explainlaw.db.models import NpaDocument, NpaEnactment, PostBank, PostItem, PostStatus, PostType
+
+_MONTHS_GENITIVE = (
+    "января",
+    "февраля",
+    "марта",
+    "апреля",
+    "мая",
+    "июня",
+    "июля",
+    "августа",
+    "сентября",
+    "октября",
+    "ноября",
+    "декабря",
+)
+
+
+def format_ru_day(day: date) -> str:
+    """7 августа 2026"""
+    return f"{day.day} {_MONTHS_GENITIVE[day.month - 1]} {day.year}"
+
+
+def digest_title_for_day(day: date) -> str:
+    return f"Обзор ФЗ · {format_ru_day(day)}"
 
 
 def _current_week_bounds(today: date) -> tuple[date, date]:
@@ -26,10 +50,16 @@ def _past_week_bounds(today: date) -> tuple[date, date]:
     return start, end
 
 
-def build_digest_content(cards: list[ScoredCard], *, week_label: str) -> str:
+def build_digest_content(
+    cards: list[ScoredCard],
+    *,
+    period_label: str | None = None,
+    week_label: str | None = None,
+) -> str:
     from explainlaw.gates.text_checks import reflow_soft_linebreaks
 
-    lines = [f"Еженедельный дайджест законодательных изменений ({week_label})", ""]
+    label = period_label or week_label or ""
+    lines = [f"Свежие федеральные законы ({label})", ""]
     for idx, card in enumerate(cards, start=1):
         doc = card.document
         num = doc.number or "—"
@@ -40,6 +70,20 @@ def build_digest_content(cards: list[ScoredCard], *, week_label: str) -> str:
             lines.append(f"Источник: {doc.source_url}")
         lines.append("")
     return "\n".join(lines).strip()
+
+
+def build_quiet_day_content(*, day: date) -> str:
+    """Текст на день без новых ФЗ — спокойный, без «ошибок» и пустых списков."""
+    label = format_ru_day(day)
+    return (
+        f"За {label} на официальном портале правовых актов "
+        f"новых федеральных законов не публиковали.\n\n"
+        f"Между сессиями Госдумы такое бывает: несколько тихих дней подряд, "
+        f"затем — пачка поправок за один вечер.\n\n"
+        f"Мы смотрим обновления каждый день и пришлём разбор, "
+        f"как только появятся свежие ФЗ.\n\n"
+        f"Источник: http://publication.pravo.gov.ru"
+    )
 
 
 def create_digest_post(
@@ -53,15 +97,12 @@ def create_digest_post(
         return None
 
     today = today or date.today()
-    week_start, week_end = _past_week_bounds(today)
-    week_label = f"{week_start.isoformat()} — {week_end.isoformat()}"
-    title = f"Дайджест ФЗ ({week_start.strftime('%d.%m')}–{week_end.strftime('%d.%m.%Y')})"
-    if post_type == PostType.mini_digest:
-        title = f"Мини-дайджест ФЗ ({week_start.strftime('%d.%m.%Y')})"
+    title = digest_title_for_day(today)
+    period_label = format_ru_day(today)
 
     post = PostBank(
         title=title,
-        content=build_digest_content(cards, week_label=week_label),
+        content=build_digest_content(cards, period_label=period_label),
         post_type=post_type,
         status=PostStatus.ready,
     )
@@ -75,6 +116,20 @@ def create_digest_post(
         card.document.included_in_post = True
         card.document.significance_score = card.score
 
+    return post
+
+
+def build_quiet_day_post(session: Session, *, today: date | None = None) -> PostBank:
+    """Ежедневная сводка без новостей — всё равно уходит в Telegram."""
+    today = today or date.today()
+    post = PostBank(
+        title=digest_title_for_day(today),
+        content=build_quiet_day_content(day=today),
+        post_type=PostType.mini_digest,
+        status=PostStatus.ready,
+    )
+    session.add(post)
+    session.flush()
     return post
 
 

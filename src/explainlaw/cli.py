@@ -444,7 +444,7 @@ def main() -> None:
     )
     p_gate.set_defaults(func=cmd_gate)
 
-    p_publish = sub.add_parser("publish", help="Собрать еженедельный дайджест из post_bank (§7.2)")
+    p_publish = sub.add_parser("publish", help="Собрать ежедневную сводку из post_bank (§7.2)")
     p_publish.add_argument("--min-items", type=int, help="Минимум карточек для полного дайджеста")
     p_publish.add_argument("--max-items", type=int, help="Максимум карточек в дайджесте")
     p_publish.add_argument("--dry-run", action="store_true", help="Только показать отбор, без записи")
@@ -506,7 +506,7 @@ def main() -> None:
     p_daily.add_argument(
         "--weekly-publish",
         action="store_true",
-        help="Также собрать еженедельный дайджест (для cron по понедельникам)",
+        help="Также собрать сводку и отправить в Telegram",
     )
     p_daily.add_argument("--no-alert", action="store_true", help="Не отправлять webhook-алерт")
     p_daily.set_defaults(func=cmd_daily)
