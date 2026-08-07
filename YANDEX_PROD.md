@@ -18,6 +18,7 @@ git pull
 cp .env.example .env
 # заполнить .env: DATABASE_URL, AWS_*, KAFKA_*, TELEGRAM_*  (см. §3)
 
+# pip ходит на зеркало (pypi.org с VPS часто ReadTimeout)
 sudo docker compose up -d --build
 sudo docker compose exec app alembic upgrade head
 

@@ -12,7 +12,11 @@
 services:
   # --- Приложение (по умолчанию, без profile) ---
   app:
-    build: .
+    build:
+      context: .
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple}
+        PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-mirrors.aliyun.com}
     image: regulatory-legal-acts:latest
     container_name: regulatory-legal-acts-app
     env_file: .env
@@ -37,7 +41,11 @@ services:
 
   cron:
     image: regulatory-legal-acts:latest
-    build: .
+    build:
+      context: .
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple}
+        PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-mirrors.aliyun.com}
     container_name: regulatory-legal-acts-cron
     env_file: .env
     environment:

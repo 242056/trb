@@ -32,10 +32,16 @@ COPY alembic.ini ./
 COPY scripts ./scripts
 COPY docker ./docker
 
-# На части хостов pypi.org отвечает с ReadTimeout — длинный timeout + ретраи.
-ENV PIP_DEFAULT_TIMEOUT=120 \
+# С части VPS (Yandex и др.) pypi.org даёт ReadTimeout на setuptools.
+# Зеркало по умолчанию; переопределение: --build-arg PIP_INDEX_URL=...
+ARG PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple
+ARG PIP_TRUSTED_HOST=mirrors.aliyun.com
+ENV PIP_INDEX_URL=${PIP_INDEX_URL} \
+    PIP_TRUSTED_HOST=${PIP_TRUSTED_HOST} \
+    PIP_DEFAULT_TIMEOUT=60 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
-RUN pip install --no-cache-dir --retries 10 -e ".[ocr]" \
+RUN pip install --no-cache-dir --retries 5 --upgrade pip setuptools wheel \
+    && pip install --no-cache-dir --retries 5 ".[ocr]" \
     && chmod +x /app/docker/cron-entrypoint.sh /app/docker/cron-run.sh \
     && test -x /usr/local/bin/explainlaw
 
