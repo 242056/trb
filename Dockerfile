@@ -32,7 +32,10 @@ COPY alembic.ini ./
 COPY scripts ./scripts
 COPY docker ./docker
 
-RUN pip install --no-cache-dir -e ".[ocr]" \
+# На части хостов pypi.org отвечает с ReadTimeout — длинный timeout + ретраи.
+ENV PIP_DEFAULT_TIMEOUT=120 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+RUN pip install --no-cache-dir --retries 10 -e ".[ocr]" \
     && chmod +x /app/docker/cron-entrypoint.sh /app/docker/cron-run.sh \
     && test -x /usr/local/bin/explainlaw
 
