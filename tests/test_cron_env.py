@@ -9,12 +9,21 @@ def test_render_crontab_defaults():
     assert "/app/docker/cron-run.sh /usr/local/bin/explainlaw daily --process-limit 50" in text
     assert "publish --mark-published" in text
     assert "rebuild-deltas --resume --limit 500" in text
-    assert "health --alert" in text
+    assert "# disabled: health + alerts" in text
     assert "0 8 * * *" in text
     assert "0 9 * * 1" in text
-    assert "30 8 * * *" in text
+    # active health job отсутствует
+    assert "explainlaw health --alert" not in text
     # weekly больше не гоняет тяжёлый daily --weekly-publish
     assert "--weekly-publish" not in text
+
+
+def test_render_crontab_health_can_be_enabled():
+    text = render_crontab(
+        Settings(_env_file=None, cron_health_enabled=True, cron_health_schedule="30 8 * * *")
+    )
+    assert "30 8 * * * /app/docker/cron-run.sh /usr/local/bin/explainlaw health --alert" in text
+    assert "# disabled: health + alerts" not in text
 
 
 def test_render_crontab_custom_schedule_and_limits():

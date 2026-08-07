@@ -78,7 +78,8 @@ class Settings(BaseSettings):
     # Файл-маркер последней отправки TG-алерта (для суточного лимита)
     alert_telegram_state_path: str = "logs/alert_telegram_state.json"
     # Утренний ping в TG даже когда всё OK (проверка канала каждый день)
-    alert_telegram_heartbeat: bool = True
+    # Утренний OK в Telegram (по умолчанию выкл. — в чат только сводка в пн)
+    alert_telegram_heartbeat: bool = False
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
     # Слать дайджест в Telegram при publish --mark-published / weekly
@@ -108,8 +109,8 @@ class Settings(BaseSettings):
     cron_weekly_schedule: str = "0 9 * * 1"
     cron_backfill_enabled: bool = True
     cron_backfill_schedule: str = "0 3 * * 0"
-    cron_health_enabled: bool = True
-    # После daily 08:00 — health/heartbeat в TG
+    cron_health_enabled: bool = False
+    # После daily 08:00 — health/heartbeat в TG (выкл. по умолчанию)
     cron_health_schedule: str = "30 8 * * *"
     # При старте cron-контейнера сразу прогнать job (прод-тест)
     cron_run_on_start: bool = False
