@@ -8,14 +8,17 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from explainlaw.db.models import NpaDelta, NpaDocument, NpaSummary, PostBank, PostItem, PostStatus, PostType
-from explainlaw.gates.text_checks import clean_quote_snippet, reflow_soft_linebreaks
+from explainlaw.gates.text_checks import (
+    clean_quote_snippet,
+    reflow_soft_linebreaks,
+    sanitize_article_number,
+)
 
 
-def _short_title(name: str | None, max_len: int = 80) -> str:
+def _short_title(name: str | None) -> str:
     if not name:
         return "Федеральный закон"
-    title = re.sub(r"\s+", " ", name.strip().strip('"«»'))
-    return title if len(title) <= max_len else title[: max_len - 1] + "…"
+    return re.sub(r"\s+", " ", name.strip().strip('"«»'))
 
 
 def _format_card_content(doc: NpaDocument, summary: NpaSummary, delta: NpaDelta) -> str:
@@ -28,9 +31,9 @@ def _format_card_content(doc: NpaDocument, summary: NpaSummary, delta: NpaDelta)
     for change in changes[:5]:
         target = change.get("target_act") or {}
         target_label = target.get("number") or target.get("name") or "акт"
-        article = (change.get("unit_address") or {}).get("статья")
+        article = sanitize_article_number((change.get("unit_address") or {}).get("статья"))
         article_part = f", ст. {article}" if article else ""
-        after = clean_quote_snippet(change.get("text_after") or "", max_len=200)
+        after = clean_quote_snippet(change.get("text_after") or "")
         lines.append(f"• {target_label}{article_part}: {after}")
     return "\n".join(lines)
 

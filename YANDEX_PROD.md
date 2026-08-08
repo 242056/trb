@@ -18,6 +18,7 @@ git pull
 cp .env.example .env
 # заполнить .env: DATABASE_URL, AWS_*, KAFKA_*, TELEGRAM_*  (см. §3)
 
+# pip ходит на зеркало (pypi.org с VPS часто ReadTimeout)
 sudo docker compose up -d --build
 sudo docker compose exec app alembic upgrade head
 
@@ -105,9 +106,9 @@ CRON_RUN_ON_START=false
 
 | Когда (MSK) | Команда |
 |-------------|---------|
-| каждый день 08:00 | `daily --process-limit 50 --fetch-missing 3` |
-| каждый день 08:30 | `health --alert` (проблема **или** утренний OK в Telegram) |
-| пн 09:00 | `publish --mark-published` (дайджест **за прошедшую** пн–вс → Telegram) |
+| каждый день 08:00 | `daily --process-limit 50 --fetch-missing 3` (collect: вчера+сегодня) |
+| каждый день 09:00 | `publish --mark-published` (сводка в Telegram; если новостей нет — тихий день) |
+| каждый день 08:30 | ~~`health --alert`~~ **выкл.** (`CRON_HEALTH_ENABLED=false`) |
 | вс 03:00 | `rebuild-deltas --resume --limit 500` |
 
 Проверка crontab внутри контейнера:
@@ -118,7 +119,7 @@ sudo docker compose exec cron cat /tmp/explainlaw.crontab
 
 В crontab **не должно** быть `--weekly-publish`. Weekly = только `publish`.
 
-Дайджест: заголовок вида `Дайджест ФЗ (27.07–02.08.2026)` = прошедшая неделя.  
+Сводка: заголовок вида `Обзор ФЗ · 7 августа 2026`. Если за день новых ФЗ нет — уходит «тихий день» (нормальный текст, не пустой список).  
 OCR soft-wraps склеиваются при публикации.
 
 ---
@@ -150,7 +151,7 @@ sudo docker compose exec app explainlaw publish --mark-published   # тольк�
 - [ ] `alembic upgrade head`
 - [ ] `./scripts/prod_verify.sh` → OK
 - [ ] Qwen-worker слушает Kafka `llm.requests` / `llm.responses`
-- [ ] Бот в TG-группе; в пн 09:00 ждём дайджест
+- [ ] Бот в TG-группе; каждый день 09:00 — сводка (или тихий день)
 
 ---
 

@@ -96,6 +96,7 @@ def run_summary_gate(
         document_date=doc.document_date.isoformat() if doc.document_date else None,
         name=doc.name,
         delta_changes=changes,
+        publish_date=doc.publish_date_short,
     )
 
     for number in extract_summary_numbers(summary.summary_text):

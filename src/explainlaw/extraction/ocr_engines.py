@@ -28,7 +28,11 @@ class OcrEngine(Protocol):
 
 
 class TesseractEngine:
+    """Tesseract OCR: OEM LSTM + PSM 6 (блок текста), dpi задаётся при растеризации."""
+
     name = "tesseract"
+    # Лучший бесплатный профиль на наших сканах pravo (dpi200 ≈ dpi300 по качеству).
+    _TESS_CONFIG = "--oem 3 --psm 6"
 
     def available(self) -> bool:
         try:
@@ -42,10 +46,12 @@ class TesseractEngine:
         import io
 
         import pytesseract
-        from PIL import Image
+        from PIL import Image, ImageOps
 
         img = Image.open(io.BytesIO(image_bytes))
-        return pytesseract.image_to_string(img, lang="rus")
+        # grayscale + лёгкий контраст стабильнее на сканах НПА
+        img = ImageOps.autocontrast(img.convert("L"))
+        return pytesseract.image_to_string(img, lang="rus", config=self._TESS_CONFIG)
 
 
 class PaddleEngine:

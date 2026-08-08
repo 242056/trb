@@ -1,7 +1,12 @@
 from datetime import date
 
 from explainlaw.content.digest import _current_week_bounds, _past_week_bounds
-from explainlaw.gates.text_checks import clean_quote_snippet, reflow_soft_linebreaks
+from explainlaw.gates.text_checks import (
+    clean_quote_snippet,
+    fix_ocr_artifacts,
+    reflow_soft_linebreaks,
+    truncate_at_word,
+)
 from explainlaw.messaging.telegram import format_post_for_telegram
 
 
@@ -47,12 +52,65 @@ def test_reflow_keeps_digest_structure():
     assert "Сторонами концессионного соглашения" in text
 
 
+def test_reflow_drops_lone_ocr_letter_lines():
+    raw = "на основании решения\n\nМ\n\nсуда или безвозмездно"
+    text = reflow_soft_linebreaks(raw)
+    assert " М " not in f" {text} "
+    assert "решения" in text and "суда" in text
+
+
 def test_clean_quote_strips_ocr_garbage_before_guillemet():
     raw = "|ЛИВИИ\n\n2\n«1. Сторонами\nконцессионного\nсоглашения,"
-    text = clean_quote_snippet(raw, max_len=80)
+    text = clean_quote_snippet(raw)
     assert text.startswith("«1.")
     assert "|ЛИВИИ" not in text
     assert "Сторонами концессионного" in text
+
+
+def test_fix_ocr_artifacts_common_cases():
+    raw = "Статья 8®. на счете дено прав, ст. 6:7 и статьи 12! Федерального"
+    text = fix_ocr_artifacts(raw)
+    assert "®" not in text
+    assert "дено" not in text.lower()
+    assert "депо" in text
+    assert "6.7" in text
+    assert "12!" not in text
+    assert "Статья 8." in text
+
+
+def test_fix_ocr_artifacts_legal_superscripts():
+    """Реальные ошибки Tesseract на надстрочных индексах статей НПА."""
+    raw = (
+        "Пункт 8 статьи 84? Федерального закона от 26 декабря 1995 года; "
+        "предусмотренный пунктом 2 части второй статьи 15' настоящего; "
+        "подпункт 1 статьи 39°7 после слов; "
+        "установленных частью 6! статьи 15; "
+        "дополнить частью 3' следующего содержания; "
+        "статьей 17? настоящего Федерального закона; "
+        "мусор ® и ° и ` в тексте"
+    )
+    text = fix_ocr_artifacts(raw)
+    assert "84?" not in text
+    assert "15'" not in text
+    assert "39°7" not in text
+    assert "39.7" in text
+    assert "6!" not in text
+    assert "3'" not in text
+    assert "17?" not in text
+    assert "®" not in text and "°" not in text and "`" not in text
+    assert "статьи 84 Федерального" in text
+    assert "статьи 15 настоящего" in text
+
+
+def test_clean_quote_keeps_full_text_without_truncation():
+    raw = "«" + ("слово " * 40) + "конец»"
+    text = clean_quote_snippet(raw)
+    assert "конец»" in text
+    assert not text.endswith("…")
+
+
+def test_truncate_at_word_short_unchanged():
+    assert truncate_at_word("короткий", 20) == "короткий"
 
 
 def test_telegram_format_reflows_and_keeps_html():

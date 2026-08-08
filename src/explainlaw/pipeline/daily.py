@@ -8,8 +8,7 @@ from datetime import date
 
 from sqlalchemy.orm import Session
 
-from explainlaw.collector.service import DailyCollector
-from explainlaw.config import settings
+from explainlaw.collector.service import DailyCollector, collect_window
 from explainlaw.content.publisher import WeeklyPublisher
 from explainlaw.db.models import PipelineJobType
 from explainlaw.gates.runner import GateRunner
@@ -71,7 +70,15 @@ class DailyPipeline:
         fetcher = MissingActsFetcher(self._session, self._storage, pravo=collector._pravo)
 
         try:
-            collect_stats = collector.collect(target_date=target_date or date.today())
+            # Не только «сегодня»: ФЗ часто выходят после 08:00 в тот же день.
+            # Окно [вчера, сегодня] при cron 08:00 ≈ прошедшие сутки.
+            date_from, date_to = collect_window(anchor=target_date or date.today())
+            logger.info(
+                "Daily collect window %s .. %s",
+                date_from.isoformat(),
+                date_to.isoformat(),
+            )
+            collect_stats = collector.collect(date_from=date_from, date_to=date_to)
             stats.collect = collect_stats.to_dict()
             record_run(
                 self._session,

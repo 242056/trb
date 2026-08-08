@@ -98,6 +98,46 @@ def _regex_extract(fragment: str) -> list[NormChangeDraft]:
     return drafts
 
 
+def _sanitize_unit_address(addr: dict[str, Any] | None) -> dict[str, Any]:
+    from explainlaw.gates.text_checks import sanitize_article_number
+
+    cleaned: dict[str, Any] = dict(addr or {})
+    article = sanitize_article_number(cleaned.get("статья"))
+    if article is None:
+        cleaned.pop("статья", None)
+    else:
+        cleaned["статья"] = article
+    return cleaned
+
+
+def _ground_draft(draft: NormChangeDraft, fragment: str) -> NormChangeDraft | None:
+    """Оставить только изменения с дословным text_after (или без текста)."""
+    from explainlaw.gates.text_checks import ground_text_in_source, verify_quote_in_source
+
+    unit = _sanitize_unit_address(draft.unit_address)
+    text_after = draft.text_after
+    if text_after:
+        grounded = ground_text_in_source(text_after, fragment)
+        if grounded is None:
+            # full_redaction без дословной цитаты — отбрасываем (иначе гейт валит пачку)
+            if draft.apply_kind == ApplyKind.full_redaction:
+                return None
+            return None
+        text_after = grounded
+        if draft.apply_kind == ApplyKind.full_redaction and not verify_quote_in_source(
+            text_after, fragment
+        ):
+            return None
+
+    return NormChangeDraft(
+        unit_address=unit,
+        operation_type=draft.operation_type,
+        apply_kind=draft.apply_kind,
+        text_after=text_after,
+        effective_date=draft.effective_date,
+    )
+
+
 def _qwen_extract(fragment: str) -> list[NormChangeDraft]:
     client = _qwen_client()
     if not client.available:
@@ -122,23 +162,29 @@ def _qwen_extract(fragment: str) -> list[NormChangeDraft]:
         except ValueError:
             apply_kind = ApplyKind.address_patch
 
-        drafts.append(
-            NormChangeDraft(
-                unit_address=item.get("unit_address") or {},
-                operation_type=operation_type,
-                apply_kind=apply_kind,
-                text_after=item.get("text_after"),
-                effective_date=None,
-            )
+        raw = NormChangeDraft(
+            unit_address=item.get("unit_address") or {},
+            operation_type=operation_type,
+            apply_kind=apply_kind,
+            text_after=item.get("text_after"),
+            effective_date=None,
         )
+        grounded = _ground_draft(raw, fragment)
+        if grounded is not None:
+            drafts.append(grounded)
     return drafts
 
 
 def extract_norm_changes(fragment: str) -> list[NormChangeDraft]:
-    drafts = _qwen_extract(fragment)
-    if drafts:
-        return drafts
-    return _regex_extract(fragment)
+    # Сначала механика: LLM часто склеивает цитаты не дословно.
+    regex_drafts = [_ground_draft(d, fragment) for d in _regex_extract(fragment)]
+    regex_drafts = [d for d in regex_drafts if d is not None]
+    if regex_drafts:
+        return regex_drafts
+    qwen_drafts = _qwen_extract(fragment)
+    if qwen_drafts:
+        return qwen_drafts
+    return []
 
 
 def _stable_norm_id(parent_act: dict, unit_address: dict) -> str:
