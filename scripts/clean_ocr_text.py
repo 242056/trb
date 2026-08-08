@@ -87,6 +87,7 @@ def main() -> int:
 
     with SessionLocal() as session:
         last_id = None
+        clean_text_batches = 0
         while stats["texts_updated"] < args.limit:
             stmt = (
                 select(NpaText, NpaDocument.eo_number)
@@ -135,18 +136,24 @@ def main() -> int:
                     stats["texts_scanned"],
                     last_id,
                 )
+                clean_text_batches = 0
             else:
                 session.rollback()
+                clean_text_batches += 1
+                if clean_text_batches >= 40 and stats["texts_updated"] > 0:
+                    logger.info("stop texts: %s clean batches after updates", clean_text_batches)
+                    break
+                if clean_text_batches >= 200 and stats["texts_updated"] == 0:
+                    logger.info("stop texts: no dirty found")
+                    break
 
-            # защита от бесконечного скана чистого хвоста
-            if stats["texts_scanned"] > args.limit * 30 and stats["texts_updated"] == 0:
-                break
             if len(rows) < args.batch_size:
                 break
 
         if args.also_deltas:
             last_did = None
             delta_limit = args.limit * 3
+            clean_batches = 0
             while stats["deltas_updated"] < delta_limit:
                 stmt = select(NpaDelta).order_by(NpaDelta.id.desc()).limit(args.batch_size)
                 if last_did is not None:
@@ -172,8 +179,13 @@ def main() -> int:
                 if args.apply and batch_u:
                     session.commit()
                     logger.info("batch commit deltas_updated=%s", stats["deltas_updated"])
+                    clean_batches = 0
                 else:
                     session.rollback()
+                    clean_batches += 1
+                    if clean_batches >= 25:
+                        logger.info("stop deltas: %s clean batches in a row", clean_batches)
+                        break
                 if len(deltas) < args.batch_size:
                     break
 
