@@ -73,8 +73,10 @@ _WORDS_REPLACE_RE = re.compile(
 _OCR_LONE_JUNK_LETTER_RE = re.compile(
     r"(?<!\S)[БГДЖЗЙЛМНПРТФХЦЧШЩЪЫЬЭЮA-HJ-Z](?!\S)"
 )
-_OCR_FAKE_SUPERSCRIPT_RE = re.compile(r"(?<=\d)[®°%]")
-_OCR_BANG_SUPERSCRIPT_RE = re.compile(r"(?<=\d)!(?=[\s.,;:»\"\)\]]|$)")
+# 39°7 → 39.7 (надстрочная цифра, прочитанная как degree+digit)
+_OCR_DEGREE_BEFORE_DIGIT_RE = re.compile(r"(?<=\d)[°](?=\d)")
+# 84¹ / 15¹ / 6¹, которые Tesseract даёт как 84? 15' 6! 8® 17° 84`
+_OCR_FAKE_SUPERSCRIPT_RE = re.compile(r"(?<=\d)[®°%`?'’′!?]")
 _OCR_ARTICLE_COLON_RE = re.compile(r"(?<=\d):(?=\d)")
 _OCR_DENO_RE = re.compile(r"\bдено\b", re.IGNORECASE)
 _OCR_JUNK_LINE_RE = re.compile(
@@ -83,13 +85,13 @@ _OCR_JUNK_LINE_RE = re.compile(
 
 
 def fix_ocr_artifacts(text: str) -> str:
-    """Убирает типичный мусор Tesseract в текстах НПА (для отображения/карточек)."""
+    """Убирает типичный мусор Tesseract в текстах НПА (в т.ч. superscripts)."""
     if not text:
         return ""
     text = _OCR_DENO_RE.sub("депо", text)
     text = _OCR_ARTICLE_COLON_RE.sub(".", text)
+    text = _OCR_DEGREE_BEFORE_DIGIT_RE.sub(".", text)
     text = _OCR_FAKE_SUPERSCRIPT_RE.sub("", text)
-    text = _OCR_BANG_SUPERSCRIPT_RE.sub("", text)
     text = _OCR_LONE_JUNK_LETTER_RE.sub(" ", text)
     text = re.sub(r"[ \t]{2,}", " ", text)
     return text

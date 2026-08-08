@@ -78,6 +78,28 @@ def test_fix_ocr_artifacts_common_cases():
     assert "Статья 8." in text
 
 
+def test_fix_ocr_artifacts_legal_superscripts():
+    """Реальные ошибки Tesseract на надстрочных индексах статей НПА."""
+    raw = (
+        "Пункт 8 статьи 84? Федерального закона от 26 декабря 1995 года; "
+        "предусмотренный пунктом 2 части второй статьи 15' настоящего; "
+        "подпункт 1 статьи 39°7 после слов; "
+        "установленных частью 6! статьи 15; "
+        "дополнить частью 3' следующего содержания; "
+        "статьей 17? настоящего Федерального закона"
+    )
+    text = fix_ocr_artifacts(raw)
+    assert "84?" not in text
+    assert "15'" not in text
+    assert "39°7" not in text
+    assert "39.7" in text
+    assert "6!" not in text
+    assert "3'" not in text
+    assert "17?" not in text
+    assert "статьи 84 Федерального" in text
+    assert "статьи 15 настоящего" in text
+
+
 def test_clean_quote_keeps_full_text_without_truncation():
     raw = "«" + ("слово " * 40) + "конец»"
     text = clean_quote_snippet(raw)

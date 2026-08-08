@@ -40,9 +40,16 @@ def extract_text_from_pdf(pdf_bytes: bytes) -> ExtractionResult:
                 text=text, method=TextExtractionMethod.pdf_text, page_count=len(pages)
             )
 
-        ocr_text = _ocr_pdf_pages(doc)
-        if not ocr_text or len(ocr_text) < settings.ocr_text_threshold:
+        # tesseract: сначала PyMuPDF OCR (тот же tess, быстрее), затем pytesseract-профиль.
+        preferred = (settings.ocr_engine or "tesseract").strip().lower()
+        if preferred == "tesseract":
             ocr_text = _ocr_with_fitz(doc)
+            if not ocr_text or len(ocr_text) < settings.ocr_text_threshold:
+                ocr_text = _ocr_pdf_pages(doc)
+        else:
+            ocr_text = _ocr_pdf_pages(doc)
+            if not ocr_text or len(ocr_text) < settings.ocr_text_threshold:
+                ocr_text = _ocr_with_fitz(doc)
 
         if ocr_text and len(ocr_text) > len(text):
             return ExtractionResult(
