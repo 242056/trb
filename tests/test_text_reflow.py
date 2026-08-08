@@ -61,7 +61,7 @@ def test_reflow_drops_lone_ocr_letter_lines():
 
 def test_clean_quote_strips_ocr_garbage_before_guillemet():
     raw = "|ЛИВИИ\n\n2\n«1. Сторонами\nконцессионного\nсоглашения,"
-    text = clean_quote_snippet(raw, max_len=80)
+    text = clean_quote_snippet(raw)
     assert text.startswith("«1.")
     assert "|ЛИВИИ" not in text
     assert "Сторонами концессионного" in text
@@ -78,12 +78,11 @@ def test_fix_ocr_artifacts_common_cases():
     assert "Статья 8." in text
 
 
-def test_clean_quote_truncates_at_word_boundary():
-    raw = "«" + ("слово " * 40)
-    text = clean_quote_snippet(raw, max_len=50)
-    assert len(text) <= 50
-    assert text.endswith("…")
-    assert text[:-1].rstrip().endswith("слово")
+def test_clean_quote_keeps_full_text_without_truncation():
+    raw = "«" + ("слово " * 40) + "конец»"
+    text = clean_quote_snippet(raw)
+    assert "конец»" in text
+    assert not text.endswith("…")
 
 
 def test_truncate_at_word_short_unchanged():

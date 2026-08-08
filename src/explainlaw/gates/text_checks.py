@@ -163,14 +163,16 @@ def reflow_soft_linebreaks(text: str) -> str:
     return "\n".join(cleaned).strip()
 
 
-def clean_quote_snippet(text: str, *, max_len: int = 200) -> str:
-    """Текст цитаты для карточки: reflow + OCR-clean + обрезка по слову."""
+def clean_quote_snippet(text: str, *, max_len: int | None = None) -> str:
+    """Текст цитаты для карточки: reflow + OCR-clean (без обрезки смысла)."""
     text = reflow_soft_linebreaks(text or "")
     match = _QUOTE_START_RE.search(text[:80])
     if match:
         text = text[match.start() :]
     text = normalize_whitespace(fix_ocr_artifacts(text))
-    return truncate_at_word(text, max_len)
+    if max_len is not None:
+        return truncate_at_word(text, max_len)
+    return text
 
 
 def sanitize_article_number(article: str | None) -> str | None:

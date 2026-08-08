@@ -12,15 +12,13 @@ from explainlaw.gates.text_checks import (
     clean_quote_snippet,
     reflow_soft_linebreaks,
     sanitize_article_number,
-    truncate_at_word,
 )
 
 
-def _short_title(name: str | None, max_len: int = 80) -> str:
+def _short_title(name: str | None) -> str:
     if not name:
         return "Федеральный закон"
-    title = re.sub(r"\s+", " ", name.strip().strip('"«»'))
-    return truncate_at_word(title, max_len)
+    return re.sub(r"\s+", " ", name.strip().strip('"«»'))
 
 
 def _format_card_content(doc: NpaDocument, summary: NpaSummary, delta: NpaDelta) -> str:
@@ -35,7 +33,7 @@ def _format_card_content(doc: NpaDocument, summary: NpaSummary, delta: NpaDelta)
         target_label = target.get("number") or target.get("name") or "акт"
         article = sanitize_article_number((change.get("unit_address") or {}).get("статья"))
         article_part = f", ст. {article}" if article else ""
-        after = clean_quote_snippet(change.get("text_after") or "", max_len=200)
+        after = clean_quote_snippet(change.get("text_after") or "")
         lines.append(f"• {target_label}{article_part}: {after}")
     return "\n".join(lines)
 

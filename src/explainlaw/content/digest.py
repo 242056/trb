@@ -56,14 +56,14 @@ def build_digest_content(
     period_label: str | None = None,
     week_label: str | None = None,
 ) -> str:
-    from explainlaw.gates.text_checks import reflow_soft_linebreaks, truncate_at_word
+    from explainlaw.gates.text_checks import reflow_soft_linebreaks
 
     label = period_label or week_label or ""
     lines = [f"Свежие федеральные законы ({label})", ""]
     for idx, card in enumerate(cards, start=1):
         doc = card.document
         num = doc.number or "—"
-        title = truncate_at_word(doc.name or doc.eo_number or "", 120)
+        title = doc.name or doc.eo_number or ""
         lines.append(f"{idx}. №{num} — {title}")
         lines.append(reflow_soft_linebreaks(card.card.content.strip()))
         if doc.source_url:
@@ -135,8 +135,6 @@ def build_quiet_day_post(session: Session, *, today: date | None = None) -> Post
 
 def build_enactment_week_post(session: Session, *, today: date | None = None) -> PostBank | None:
     """Запасной формат: что вступает в силу на этой неделе."""
-    from explainlaw.gates.text_checks import truncate_at_word
-
     today = today or date.today()
     week_start, week_end = _current_week_bounds(today)
 
@@ -164,7 +162,7 @@ def build_enactment_week_post(session: Session, *, today: date | None = None) ->
             continue
         seen.add(key)
         num = doc.number or "—"
-        title = truncate_at_word(doc.name or doc.eo_number or "", 100)
+        title = doc.name or doc.eo_number or ""
         article = (enactment.unit_address or {}).get("статья")
         article_part = f", ст. {article}" if article else ""
         src = f" — {doc.source_url}" if doc.source_url else ""
