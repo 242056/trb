@@ -86,7 +86,8 @@ def test_fix_ocr_artifacts_legal_superscripts():
         "подпункт 1 статьи 39°7 после слов; "
         "установленных частью 6! статьи 15; "
         "дополнить частью 3' следующего содержания; "
-        "статьей 17? настоящего Федерального закона"
+        "статьей 17? настоящего Федерального закона; "
+        "мусор ® и ° и ` в тексте"
     )
     text = fix_ocr_artifacts(raw)
     assert "84?" not in text
@@ -96,6 +97,7 @@ def test_fix_ocr_artifacts_legal_superscripts():
     assert "6!" not in text
     assert "3'" not in text
     assert "17?" not in text
+    assert "®" not in text and "°" not in text and "`" not in text
     assert "статьи 84 Федерального" in text
     assert "статьи 15 настоящего" in text
 

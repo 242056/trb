@@ -28,7 +28,10 @@ from explainlaw.gates.text_checks import fix_ocr_artifacts, reflow_soft_linebrea
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("clean_ocr_text")
 
-_JUNK_RE = re.compile(r"[®°%`?'’′!]|(?<=\d):(?=\d)|\bдено\b", re.IGNORECASE)
+_JUNK_RE = re.compile(
+    r"[®°`]|(?<=\d)[''’′!?]|(?<=\d):(?=\d)|\bдено\b",
+    re.IGNORECASE,
+)
 
 
 def _needs_clean(text: str | None) -> bool:
@@ -87,7 +90,6 @@ def main() -> int:
 
     with SessionLocal() as session:
         last_id = None
-        clean_text_batches = 0
         while stats["texts_updated"] < args.limit:
             stmt = (
                 select(NpaText, NpaDocument.eo_number)
@@ -136,16 +138,8 @@ def main() -> int:
                     stats["texts_scanned"],
                     last_id,
                 )
-                clean_text_batches = 0
             else:
                 session.rollback()
-                clean_text_batches += 1
-                if clean_text_batches >= 40 and stats["texts_updated"] > 0:
-                    logger.info("stop texts: %s clean batches after updates", clean_text_batches)
-                    break
-                if clean_text_batches >= 200 and stats["texts_updated"] == 0:
-                    logger.info("stop texts: no dirty found")
-                    break
 
             if len(rows) < args.batch_size:
                 break
@@ -183,7 +177,7 @@ def main() -> int:
                 else:
                     session.rollback()
                     clean_batches += 1
-                    if clean_batches >= 25:
+                    if clean_batches >= 80:
                         logger.info("stop deltas: %s clean batches in a row", clean_batches)
                         break
                 if len(deltas) < args.batch_size:

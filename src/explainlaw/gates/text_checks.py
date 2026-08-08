@@ -77,6 +77,8 @@ _OCR_LONE_JUNK_LETTER_RE = re.compile(
 _OCR_DEGREE_BEFORE_DIGIT_RE = re.compile(r"(?<=\d)[°](?=\d)")
 # 84¹ / 15¹ / 6¹, которые Tesseract даёт как 84? 15' 6! 8® 17° 84`
 _OCR_FAKE_SUPERSCRIPT_RE = re.compile(r"(?<=\d)[®°%`?'’′!?]")
+# одиночные ®°` вне цифр — почти всегда OCR-мусор в НПА
+_OCR_STRAY_MARKS_RE = re.compile(r"[®°`]")
 _OCR_ARTICLE_COLON_RE = re.compile(r"(?<=\d):(?=\d)")
 _OCR_DENO_RE = re.compile(r"\bдено\b", re.IGNORECASE)
 _OCR_JUNK_LINE_RE = re.compile(
@@ -92,6 +94,7 @@ def fix_ocr_artifacts(text: str) -> str:
     text = _OCR_ARTICLE_COLON_RE.sub(".", text)
     text = _OCR_DEGREE_BEFORE_DIGIT_RE.sub(".", text)
     text = _OCR_FAKE_SUPERSCRIPT_RE.sub("", text)
+    text = _OCR_STRAY_MARKS_RE.sub("", text)
     text = _OCR_LONE_JUNK_LETTER_RE.sub(" ", text)
     text = re.sub(r"[ \t]{2,}", " ", text)
     return text
