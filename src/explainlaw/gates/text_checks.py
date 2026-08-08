@@ -69,6 +69,49 @@ _WORDS_REPLACE_RE = re.compile(
     r"(?:заменить|дополнить)\s+словами\s*«([^»]{8,800})»",
     re.IGNORECASE,
 )
+# Одиночная заглавная (не самостоятельное русское слово) — типичный OCR-обрывок
+_OCR_LONE_JUNK_LETTER_RE = re.compile(
+    r"(?<!\S)[БГДЖЗЙЛМНПРТФХЦЧШЩЪЫЬЭЮA-HJ-Z](?!\S)"
+)
+_OCR_FAKE_SUPERSCRIPT_RE = re.compile(r"(?<=\d)[®°%]")
+_OCR_BANG_SUPERSCRIPT_RE = re.compile(r"(?<=\d)!(?=[\s.,;:»\"\)\]]|$)")
+_OCR_ARTICLE_COLON_RE = re.compile(r"(?<=\d):(?=\d)")
+_OCR_DENO_RE = re.compile(r"\bдено\b", re.IGNORECASE)
+_OCR_JUNK_LINE_RE = re.compile(
+    r"^(?:\d{1,3}|[БГДЖЗЙЛМНПРТФХЦЧШЩЪЫЬЭЮA-HJ-Z]|[®°%|]+)$"
+)
+
+
+def fix_ocr_artifacts(text: str) -> str:
+    """Убирает типичный мусор Tesseract в текстах НПА (для отображения/карточек)."""
+    if not text:
+        return ""
+    text = _OCR_DENO_RE.sub("депо", text)
+    text = _OCR_ARTICLE_COLON_RE.sub(".", text)
+    text = _OCR_FAKE_SUPERSCRIPT_RE.sub("", text)
+    text = _OCR_BANG_SUPERSCRIPT_RE.sub("", text)
+    text = _OCR_LONE_JUNK_LETTER_RE.sub(" ", text)
+    text = re.sub(r"[ \t]{2,}", " ", text)
+    return text
+
+
+def truncate_at_word(text: str, max_len: int, *, ellipsis: str = "…") -> str:
+    """Обрезка по границе слова с многоточием (без разрыва mid-word)."""
+    text = (text or "").strip()
+    if max_len <= 0:
+        return ""
+    if len(text) <= max_len:
+        return text
+    ell = ellipsis if len(ellipsis) < max_len else ""
+    budget = max_len - len(ell)
+    if budget <= 0:
+        return text[:max_len]
+    cut = text[:budget]
+    sp = max(cut.rfind(" "), cut.rfind("\n"))
+    if sp >= max(1, budget // 2):
+        cut = cut[:sp]
+    cut = cut.rstrip(" \n\t,;:—–-")
+    return f"{cut}{ell}"
 
 
 def reflow_soft_linebreaks(text: str) -> str:
@@ -97,11 +140,11 @@ def reflow_soft_linebreaks(text: str) -> str:
                 out.append("")
             continue
         # номера страниц / одиночный мусор OCR
-        if re.fullmatch(r"\d{1,3}", line):
+        if _OCR_JUNK_LINE_RE.fullmatch(line):
             continue
         if _STANDALONE_LINE_RE.match(line):
             flush()
-            out.append(line)
+            out.append(fix_ocr_artifacts(line))
         elif _CONTINUE_LINE_RE.match(line):
             flush()
             current.append(line)
@@ -116,17 +159,18 @@ def reflow_soft_linebreaks(text: str) -> str:
     for line in out:
         if line == "" and cleaned and cleaned[-1] == "":
             continue
-        cleaned.append(line)
+        cleaned.append(fix_ocr_artifacts(line) if line else line)
     return "\n".join(cleaned).strip()
 
 
 def clean_quote_snippet(text: str, *, max_len: int = 200) -> str:
-    """Текст цитаты для карточки: reflow + обрезка мусора до открывающей кавычки."""
+    """Текст цитаты для карточки: reflow + OCR-clean + обрезка по слову."""
     text = reflow_soft_linebreaks(text or "")
     match = _QUOTE_START_RE.search(text[:80])
     if match:
         text = text[match.start() :]
-    return text[:max_len].strip()
+    text = normalize_whitespace(fix_ocr_artifacts(text))
+    return truncate_at_word(text, max_len)
 
 
 def sanitize_article_number(article: str | None) -> str | None:
