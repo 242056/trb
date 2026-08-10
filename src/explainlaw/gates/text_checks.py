@@ -119,6 +119,26 @@ def truncate_at_word(text: str, max_len: int, *, ellipsis: str = "…") -> str:
     return f"{cut}{ell}"
 
 
+_SENTENCE_END_RE = re.compile(r"[.!?]")
+
+
+def truncate_at_sentence(text: str, max_len: int, *, ellipsis: str = "…") -> str:
+    """Обрезка по границе предложения; при отсутствии — откат на границу слова."""
+    text = (text or "").strip()
+    if max_len <= 0:
+        return ""
+    if len(text) <= max_len:
+        return text
+    budget_start = max(1, max_len // 2)
+    cut = text[:max_len]
+    last_end = None
+    for match in _SENTENCE_END_RE.finditer(cut):
+        last_end = match.end()
+    if last_end is not None and last_end >= budget_start:
+        return cut[:last_end].rstrip()
+    return truncate_at_word(text, max_len, ellipsis=ellipsis)
+
+
 def reflow_soft_linebreaks(text: str) -> str:
     """Склеивает PDF/OCR soft-wraps; сохраняет абзацы и структурные маркеры."""
     if not text:
@@ -168,7 +188,7 @@ def reflow_soft_linebreaks(text: str) -> str:
     return "\n".join(cleaned).strip()
 
 
-def clean_quote_snippet(text: str, *, max_len: int | None = None) -> str:
+def clean_quote_snippet(text: str, *, max_len: int | None = None, prefer_sentence: bool = False) -> str:
     """Текст цитаты для карточки: reflow + OCR-clean (без обрезки смысла)."""
     text = reflow_soft_linebreaks(text or "")
     match = _QUOTE_START_RE.search(text[:80])
@@ -176,6 +196,8 @@ def clean_quote_snippet(text: str, *, max_len: int | None = None) -> str:
         text = text[match.start() :]
     text = normalize_whitespace(fix_ocr_artifacts(text))
     if max_len is not None:
+        if prefer_sentence:
+            return truncate_at_sentence(text, max_len)
         return truncate_at_word(text, max_len)
     return text
 

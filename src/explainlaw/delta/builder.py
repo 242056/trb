@@ -15,10 +15,26 @@ from explainlaw.db.models import (
     NpaDocument,
     NpaText,
     NormChangeEvent,
+    NormEventType,
 )
 from explainlaw.extraction.act_identifier import find_document_by_identifier
 from explainlaw.extraction.article_text import extract_article_text
-from explainlaw.gates.text_checks import verify_quote_in_source
+from explainlaw.gates.text_checks import clean_quote_snippet, verify_quote_in_source
+
+_DELTA_QUOTE_MAX_LEN = 2000
+
+
+def _is_amendment_event(event: NormChangeEvent) -> bool:
+    """Baseline — точка отсчёта (полный текст нормы), не поправка."""
+    return event.event_type != NormEventType.baseline
+
+
+def _cap_delta_quote(text: str | None) -> str | None:
+    if not text:
+        return text
+    if len(text) <= _DELTA_QUOTE_MAX_LEN:
+        return text
+    return clean_quote_snippet(text, max_len=_DELTA_QUOTE_MAX_LEN, prefer_sentence=True)
 
 
 def build_delta_for_document(session: Session, doc: NpaDocument, source_text: str) -> NpaDelta | None:
@@ -38,6 +54,9 @@ def build_delta_for_document(session: Session, doc: NpaDocument, source_text: st
     has_partial = False
 
     for event in events:
+        if not _is_amendment_event(event):
+            continue
+
         parent_act = event.norm.parent_act_identifier if event.norm else {}
         target_doc = find_document_by_identifier(session, parent_act)
         text_before: str | None = None
@@ -60,7 +79,11 @@ def build_delta_for_document(session: Session, doc: NpaDocument, source_text: st
         else:
             has_partial = True
 
-        quote_ok = verify_quote_in_source(event.text_after, source_text)
+        text_after = _cap_delta_quote(event.text_after)
+        if text_before and text_after and text_before.strip() == text_after.strip():
+            continue
+
+        quote_ok = verify_quote_in_source(text_after, source_text)
 
         changes.append(
             {
@@ -69,13 +92,16 @@ def build_delta_for_document(session: Session, doc: NpaDocument, source_text: st
                 "apply_kind": event.apply_kind.value,
                 "target_act": parent_act,
                 "target_in_database": target_doc is not None,
-                "text_before": text_before,
-                "text_after": event.text_after,
+                "text_before": _cap_delta_quote(text_before),
+                "text_after": text_after,
                 "effective_date": event.effective_date.isoformat(),
                 "completeness": completeness,
                 "quote_verified": quote_ok,
             }
         )
+
+    if not changes:
+        return None
 
     if has_full and not has_partial:
         status = DeltaCompleteness.full

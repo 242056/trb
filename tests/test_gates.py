@@ -2,6 +2,7 @@ from datetime import date
 
 from explainlaw.db.models import DeltaCompleteness, ModelRoute, NpaDelta, NpaDocument, NpaSummary
 from explainlaw.gates.delta_gate import run_delta_gate
+from explainlaw.gates.post_bank import format_card_content
 from explainlaw.gates.summary_gate import run_summary_gate
 from explainlaw.gates.text_checks import verify_quote_in_source
 
@@ -52,6 +53,30 @@ def test_delta_gate_flags_missing_delta():
     result = run_delta_gate(_doc(), "текст", None)
     assert not result.passed
     assert result.flags[0].flag_type == "no_delta"
+
+
+def test_format_card_content_caps_huge_text_after():
+    doc = _doc()
+    summary = NpaSummary(document_id=1, summary_text="Краткое содержание.")
+    huge_text = "Статья 1. " + ("Много одинаковых слов подряд. " * 3000)
+    delta = NpaDelta(
+        document_id=1,
+        completeness_status=DeltaCompleteness.full,
+        delta_data={
+            "changes": [
+                {
+                    "unit_address": {},
+                    "apply_kind": "full_redaction",
+                    "target_act": {"number": "10-ФЗ", "name": "Тестовый закон"},
+                    "text_after": huge_text,
+                }
+            ]
+        },
+    )
+    assert len(huge_text) > 50000
+    content = format_card_content(doc, summary, delta)
+    assert len(content) < 1000
+    assert "…" in content or content.rstrip().endswith(".")
 
 
 def test_summary_gate_grounds_numbers():
