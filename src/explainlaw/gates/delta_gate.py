@@ -13,6 +13,7 @@ from explainlaw.gates.text_checks import (
     article_mentioned_in_source,
     count_full_redactions_in_source,
     fz_number_in_source,
+    garbage_char_ratio,
     sanitize_article_number,
     verify_quote_in_source,
 )
@@ -22,6 +23,8 @@ logger = logging.getLogger(__name__)
 _SECOND_LOOK_SYSTEM = """Ты проверяешь дельту изменений закона по исходному тексту.
 Верни JSON: {"ok": true|false, "issues": ["..."]}
 ok=true только если каждое изменение дельты следует из источника без выдуманных фактов."""
+
+_GARBAGE_RATIO_THRESHOLD = 0.05
 
 
 @dataclass
@@ -136,6 +139,16 @@ def run_delta_gate(
                     flag_details={"change_index": idx, "sample": text_after[:80]},
                 )
             )
+        if text_after:
+            ratio = garbage_char_ratio(text_after)
+            if ratio > _GARBAGE_RATIO_THRESHOLD:
+                flags.append(
+                    FlagDraft(
+                        gate_number=1,
+                        flag_type="quote_garbage_ratio_high",
+                        flag_details={"change_index": idx, "ratio": round(ratio, 3)},
+                    )
+                )
 
     if delta.completeness_status == DeltaCompleteness.full:
         source_count = count_full_redactions_in_source(source_text)

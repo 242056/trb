@@ -17,6 +17,7 @@ from explainlaw.db.models import (
     NpaText,
     NormChangeEvent,
     RawFileType,
+    TextExtractionMethod,
 )
 from explainlaw.content.act_groups import assign_act_group
 from explainlaw.content.sectors import assign_sectors
@@ -30,7 +31,9 @@ from explainlaw.extraction.changes import (
 from explainlaw.extraction.enactment import extract_enactments
 from explainlaw.extraction.fragment import extract_summary_fragment
 from explainlaw.extraction.pdf_extractor import extract_text_from_pdf
+from explainlaw.extraction.quality import is_text_unreadable
 from explainlaw.extraction.relations import RelationMatch, extract_relations
+from explainlaw.extraction.retry_ocr import retry_extract_with_llm_cleanup
 from explainlaw.gates.runner import GateRunner
 from explainlaw.llm.gateway import generate_summary
 from explainlaw.missing_acts.queue import enqueue_from_relations
@@ -40,6 +43,7 @@ from explainlaw.pipeline.topics import (
     TOPIC_SUMMARY_GENERATED,
     TOPIC_TEXT_EXTRACTED,
 )
+from explainlaw.pravo.client import PravoApiClient
 from explainlaw.storage.object_store import ObjectStorage
 
 logger = logging.getLogger(__name__)
@@ -57,6 +61,7 @@ class ProcessStats:
     act_groups_assigned: int = 0
     gates_passed: int = 0
     gates_flagged: int = 0
+    excluded_unreadable: int = 0
     skipped: int = 0
     errors: int = 0
     error_details: list[str] = field(default_factory=list)
@@ -73,6 +78,7 @@ class ProcessStats:
             "act_groups_assigned": self.act_groups_assigned,
             "gates_passed": self.gates_passed,
             "gates_flagged": self.gates_flagged,
+            "excluded_unreadable": self.excluded_unreadable,
             "skipped": self.skipped,
             "errors": self.errors,
             "error_details": self.error_details,
@@ -94,6 +100,7 @@ class DocumentProcessor:
         resume: bool = False,
         min_text_chars: int = 200,
         publish_date: date | None = None,
+        pravo: PravoApiClient | None = None,
     ) -> None:
         self._session = session
         self._storage = storage
@@ -104,6 +111,7 @@ class DocumentProcessor:
         self._resume = resume
         self._min_text_chars = min_text_chars
         self._publish_date = publish_date
+        self._pravo = pravo or PravoApiClient()
 
     def process(self, *, limit: int | None = None) -> ProcessStats:
         stats = ProcessStats()
@@ -118,6 +126,10 @@ class DocumentProcessor:
                         stats.skipped += 1
                         continue
                 result = self._process_document(doc)
+                if result.get("excluded_unreadable"):
+                    stats.excluded_unreadable += 1
+                    logger.warning("Исключён (нечитаемый OCR даже после retry) %s", doc.eo_number)
+                    continue
                 if result.get("text_extracted"):
                     stats.text_extracted += 1
                 if result.get("summarized"):
@@ -216,6 +228,7 @@ class DocumentProcessor:
                     has_pending_gate,
                 )
             )
+            .where(NpaText.is_unreadable.isnot(True))
             .order_by(
                 NpaText.id.is_(None).desc(),
                 NpaDocument.publish_date_short.desc(),
@@ -236,6 +249,29 @@ class DocumentProcessor:
         if doc.text is None or (self._force and not self._rebuild_deltas_only):
             pdf_bytes = self._storage.get_by_path(pdf_raw.storage_path)
             extraction = extract_text_from_pdf(pdf_bytes)
+
+            if is_text_unreadable(extraction.text, extraction.page_count):
+                logger.warning("Текст %s нечитаем, пробую передокачку + переOCR", doc.eo_number)
+                fresh_pdf_bytes = self._pravo.download_pdf(doc.eo_number)
+                retry_text, still_unreadable = retry_extract_with_llm_cleanup(fresh_pdf_bytes)
+                if still_unreadable:
+                    if doc.text:
+                        self._session.delete(doc.text)
+                        self._session.flush()
+                    self._session.add(
+                        NpaText(
+                            document_id=doc.id,
+                            full_text=retry_text,
+                            extraction_method=extraction.method,
+                            page_count_extracted=extraction.page_count,
+                            is_unreadable=True,
+                        )
+                    )
+                    self._session.commit()
+                    return {"excluded_unreadable": True}
+                extraction.text = retry_text
+                extraction.method = TextExtractionMethod.ocr
+
             if doc.text:
                 self._session.delete(doc.text)
                 self._session.flush()
@@ -454,6 +490,7 @@ class DocumentProcessor:
             summary = NpaSummary(
                 document_id=doc.id,
                 summary_text=summary_result.text,
+                title=summary_result.title,
                 model_route=summary_result.model_route,
                 gate_status=GateStatus.pending,
             )

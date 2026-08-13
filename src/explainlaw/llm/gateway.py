@@ -6,17 +6,26 @@ from explainlaw.db.models import ModelRoute
 
 logger = logging.getLogger(__name__)
 
-_GATEWAY_SYSTEM = """Ты редактор юридических новостей. Переформулируй предъявленные факты кратко и понятно.
+_GATEWAY_SYSTEM = """Ты редактор юридических новостей. Работай только с предъявленным контекстом.
+Верни JSON: {"title": "...", "summary": "..."}
+
+title — 5–8 слов, цепляющая суть закона. НЕ официальное название (оно длинное и однотипное
+— не помогает читателю понять, стоит ли читать дальше).
+summary — 1–2 предложения простым русским языком: что стало иначе и кого это касается.
+
 Правила:
 - Используй ТОЛЬКО информацию из предъявленного контекста.
-- Не добавляй фактов, оценок и интерпретаций.
-- 2–4 предложения, простой русский язык.
-- Укажи номер и дату закона, если они есть в контексте."""
+- Не добавляй фактов, оценок, прогнозов и интерпретаций.
+- Не пересказывай и не цитируй закон целиком, пиши своими словами.
+- Не пиши «вносятся изменения» — пиши, что именно меняется.
+- Если из контекста непонятно, что изменилось — верни ровно:
+  {"title": "", "summary": "НЕДОСТАТОЧНО ДАННЫХ"}"""
 
 
 @dataclass
 class SummaryResult:
     text: str
+    title: str
     model_route: ModelRoute
 
 
@@ -28,9 +37,16 @@ def _clean_title(name: str | None) -> str:
     return title
 
 
+def _fallback_title(name: str | None) -> str:
+    from explainlaw.gates.text_checks import truncate_at_word
+
+    title = _clean_title(name)
+    return truncate_at_word(title, 60) if title else ""
+
+
 def _fallback_summary(
     *, number: str | None, document_date: str | None, name: str | None, fragment: str
-) -> str:
+) -> SummaryResult:
     """Механическая сводка из предъявленного текста — без генерации знаний."""
     title = _clean_title(name)
     header_parts = []
@@ -46,10 +62,13 @@ def _fallback_summary(
     excerpt = excerpt[:500].strip()
 
     if header and title:
-        return f"{header}: {title}. {excerpt}"
-    if title:
-        return f"{title}. {excerpt}"
-    return excerpt or "Текст закона извлечён; сводка требует ручной проверки."
+        text = f"{header}: {title}. {excerpt}"
+    elif title:
+        text = f"{title}. {excerpt}"
+    else:
+        text = excerpt or "Текст закона извлечён; сводка требует ручной проверки."
+
+    return SummaryResult(text=text, title=_fallback_title(name), model_route=ModelRoute.qwen)
 
 
 def generate_summary(
@@ -71,8 +90,14 @@ def generate_summary(
     client = create_gateway_client()
     if client.available:
         try:
-            text = client.chat(system=_GATEWAY_SYSTEM, user=context)
-            return SummaryResult(text=text, model_route=ModelRoute.gateway)
+            data = client.chat_json(system=_GATEWAY_SYSTEM, user=context)
+            summary_text = str(data.get("summary") or "").strip()
+            if summary_text:
+                return SummaryResult(
+                    text=summary_text,
+                    title=str(data.get("title") or "").strip(),
+                    model_route=ModelRoute.gateway,
+                )
         except Exception:
             logger.exception("Gateway недоступен, пробуем Qwen на grounded контексте")
 
@@ -80,17 +105,20 @@ def generate_summary(
     qwen = create_qwen_client()
     if qwen.available:
         try:
-            text = qwen.chat(system=_GATEWAY_SYSTEM, user=context)
-            return SummaryResult(text=text, model_route=ModelRoute.qwen)
+            data = qwen.chat_json(system=_GATEWAY_SYSTEM, user=context)
+            summary_text = str(data.get("summary") or "").strip()
+            if summary_text:
+                return SummaryResult(
+                    text=summary_text,
+                    title=str(data.get("title") or "").strip(),
+                    model_route=ModelRoute.qwen,
+                )
         except Exception:
             logger.exception("Qwen недоступен, используем механический fallback")
 
-    return SummaryResult(
-        text=_fallback_summary(
-            number=number,
-            document_date=document_date,
-            name=name,
-            fragment=fragment,
-        ),
-        model_route=ModelRoute.qwen,
+    return _fallback_summary(
+        number=number,
+        document_date=document_date,
+        name=name,
+        fragment=fragment,
     )

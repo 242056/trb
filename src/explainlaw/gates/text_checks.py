@@ -100,6 +100,54 @@ def fix_ocr_artifacts(text: str) -> str:
     return text
 
 
+_SIGNATURE_TAIL_SCAN = 1500
+_SIGNATURE_PRESIDENT_LOOKBACK = 600
+
+_SIGNATURE_KREMLIN_RE = re.compile(
+    r"Москва,?\s*Кремль\s*,?\s*\d{1,2}\s+(?:" + "|".join(_MONTHS) + r")\s+\d{4}\s*(?:год[а]?)?\s*№\s*\S+",
+    re.IGNORECASE,
+)
+_SIGNATURE_PRESIDENT_RE = re.compile(
+    r"Президент\S*\s+Российской\s+Федерации",
+    re.IGNORECASE,
+)
+
+# Одиночная латинская буква среди кириллицы — типичный OCR-обрывок «вперемешку»
+_STRAY_LATIN_LETTER_RE = re.compile(r"(?<![a-zA-Z])[a-zA-Z](?![a-zA-Z])")
+
+
+def garbage_char_ratio(text: str) -> float:
+    """Доля мусорных символов во фрагменте (§1.3 отчёта — гейт на долю мусора)."""
+    stripped = (text or "").strip()
+    if not stripped:
+        return 0.0
+    junk = (
+        len(_OCR_STRAY_MARKS_RE.findall(stripped))
+        + len(_OCR_LONE_JUNK_LETTER_RE.findall(stripped))
+        + len(_STRAY_LATIN_LETTER_RE.findall(stripped))
+    )
+    denom = len(re.sub(r"\s", "", stripped))
+    return junk / denom if denom else 0.0
+
+
+def strip_signature_block(text: str) -> str:
+    """Отсекает служебный блок подписи/канцелярии в конце закона (§1.3 отчёта — не ошибка
+    OCR, а корректно распознанный блок, которому не место в контенте)."""
+    if not text:
+        return text
+    tail_start = max(0, len(text) - _SIGNATURE_TAIL_SCAN)
+    tail = text[tail_start:]
+    match = _SIGNATURE_KREMLIN_RE.search(tail)
+    if not match:
+        return text
+    cut_at = tail_start + match.start()
+    lookback_start = max(tail_start, cut_at - _SIGNATURE_PRESIDENT_LOOKBACK)
+    president_match = _SIGNATURE_PRESIDENT_RE.search(text[lookback_start:cut_at])
+    if president_match:
+        cut_at = lookback_start + president_match.start()
+    return text[:cut_at].rstrip()
+
+
 def truncate_at_word(text: str, max_len: int, *, ellipsis: str = "…") -> str:
     """Обрезка по границе слова с многоточием (без разрыва mid-word)."""
     text = (text or "").strip()

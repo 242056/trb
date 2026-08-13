@@ -64,6 +64,10 @@ class Settings(BaseSettings):
     ocr_engine: str = "tesseract"
     yandex_vision_api_key: str = ""
     yandex_vision_iam_token: str = ""
+    # Порог "документ нечитаем" (extraction/quality.py::is_text_unreadable) — выше него
+    # запускается retry (передокачка + переOCR), а не дальше это же значение после retry.
+    ocr_garbage_ratio_threshold: float = 0.08
+    ocr_min_chars_per_page: int = 80
 
     digest_min_items: int = 3
     digest_max_items: int = 7

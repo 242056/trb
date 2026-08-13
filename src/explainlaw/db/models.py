@@ -16,6 +16,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    false,
     func,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -266,6 +267,9 @@ class NpaText(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
     page_count_extracted: Mapped[int | None] = mapped_column(Integer)
+    # True — текст не прошёл quality-гейт даже после retry (передокачка+переOCR), документ
+    # навсегда исключён из выборки (см. pipeline/processor.py::_pending_documents).
+    is_unreadable: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=false())
 
     document: Mapped["NpaDocument"] = relationship(back_populates="text")
 
@@ -395,6 +399,7 @@ class NpaSummary(Base):
     )
 
     summary_text: Mapped[str] = mapped_column(Text, nullable=False)
+    title: Mapped[str | None] = mapped_column(Text, nullable=True)
     model_route: Mapped[ModelRoute] = mapped_column(
         Enum(ModelRoute, name="model_route"), nullable=False
     )
