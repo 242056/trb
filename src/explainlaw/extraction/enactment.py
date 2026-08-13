@@ -37,6 +37,16 @@ _ARTICLE_DATE_RE = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 
+_PUBLICATION_EFFECTIVE_RE = re.compile(
+    r"со\s+дня\s+(?:его\s+|их\s+)?(?:официального\s+)?опубликования",
+    re.IGNORECASE,
+)
+
+
+def mentions_publication_effective(text: str) -> bool:
+    """«вступает в силу со дня (официального) опубликования» — без явной даты."""
+    return bool(_PUBLICATION_EFFECTIVE_RE.search(text or ""))
+
 
 def _parse_ru_date(day: str, month_name: str, year: str) -> date | None:
     """OCR часто даёт «31 февраля» — пропускаем, не валим документ."""

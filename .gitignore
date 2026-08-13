@@ -25,3 +25,5 @@ bin/
 **/.DS_Store
 logs/
 collect-all.log
+
+scripts/ocr_benchmark/data/

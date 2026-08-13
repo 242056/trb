@@ -62,11 +62,10 @@ def build_digest_content(
     lines = [f"Свежие федеральные законы ({label})", ""]
     for idx, card in enumerate(cards, start=1):
         doc = card.document
-        num = doc.number or "—"
-        title = doc.name or doc.eo_number or ""
-        lines.append(f"{idx}. №{num} — {title}")
-        lines.append(reflow_soft_linebreaks(card.card.content.strip()))
-        if doc.source_url:
+        body = reflow_soft_linebreaks(card.card.content.strip())
+        lines.append(f"{idx}. {card.card.title}")
+        lines.append(body)
+        if doc.source_url and doc.source_url not in body:
             lines.append(f"Источник: {doc.source_url}")
         lines.append("")
     return "\n".join(lines).strip()

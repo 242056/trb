@@ -22,6 +22,8 @@ _VERIFY_SYSTEM = """Ты проверяющий редактор. Сверь с�
 Верни JSON: {"ok": true|false, "issues": ["..."]}
 ok=true только если КАЖДОЕ утверждение сводки следует из контекста без добавленных фактов."""
 
+_INSUFFICIENT_DATA = "НЕДОСТАТОЧНО ДАННЫХ"
+
 
 @dataclass
 class SummaryGateResult:
@@ -79,6 +81,16 @@ def run_summary_gate(
     delta: NpaDelta | None,
 ) -> SummaryGateResult:
     flags: list[FlagDraft] = []
+
+    if summary.summary_text.strip().upper().startswith(_INSUFFICIENT_DATA):
+        flags.append(
+            FlagDraft(
+                gate_number=2,
+                flag_type="insufficient_data",
+                flag_details={"message": "Gateway вернул НЕДОСТАТОЧНО ДАННЫХ"},
+            )
+        )
+        return SummaryGateResult(passed=False, flags=flags)
 
     if delta is None:
         flags.append(

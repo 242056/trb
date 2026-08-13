@@ -18,10 +18,12 @@ class ExtractionResult:
 
 
 def _normalize_text(text: str) -> str:
-    from explainlaw.gates.text_checks import reflow_soft_linebreaks
+    from explainlaw.gates.text_checks import reflow_soft_linebreaks, strip_signature_block
 
     # PDF/OCR часто даёт soft-wrap по словам («Сторонами\\nконцессионного»).
-    return reflow_soft_linebreaks(text)
+    text = reflow_soft_linebreaks(text)
+    # Служебный блок подписи/канцелярии в конце закона — не текст закона.
+    return strip_signature_block(text)
 
 
 def extract_text_from_pdf(pdf_bytes: bytes) -> ExtractionResult:

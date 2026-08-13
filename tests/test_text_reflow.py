@@ -5,6 +5,7 @@ from explainlaw.gates.text_checks import (
     clean_quote_snippet,
     fix_ocr_artifacts,
     reflow_soft_linebreaks,
+    truncate_at_sentence,
     truncate_at_word,
 )
 from explainlaw.messaging.telegram import format_post_for_telegram
@@ -111,6 +112,31 @@ def test_clean_quote_keeps_full_text_without_truncation():
 
 def test_truncate_at_word_short_unchanged():
     assert truncate_at_word("короткий", 20) == "короткий"
+
+
+def test_truncate_at_sentence_short_unchanged():
+    assert truncate_at_sentence("короткое предложение.", 100) == "короткое предложение."
+
+
+def test_truncate_at_sentence_cuts_at_sentence_boundary_no_ellipsis():
+    text = "Первое предложение достаточно длинное. Второе предложение тоже длинное и продолжается ещё дальше."
+    result = truncate_at_sentence(text, 45)
+    assert result == "Первое предложение достаточно длинное."
+    assert not result.endswith("…")
+
+
+def test_truncate_at_sentence_falls_back_to_word_boundary():
+    text = "слово " * 40 + "конецбезточкивпределахбюджета"
+    result = truncate_at_sentence(text, 30)
+    assert result.endswith("…")
+    assert result == truncate_at_word(text, 30)
+
+
+def test_clean_quote_snippet_prefers_sentence_truncation():
+    text = "«Первое предложение достаточно длинное. Второе предложение тоже длинное и продолжается ещё дальше»"
+    result = clean_quote_snippet(text, max_len=50, prefer_sentence=True)
+    assert result.startswith("«Первое предложение")
+    assert not result.endswith("…")
 
 
 def test_telegram_format_reflows_and_keeps_html():

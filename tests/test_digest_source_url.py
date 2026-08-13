@@ -11,7 +11,7 @@ def test_digest_includes_source_url():
         eo_number="0001202601010001",
         source_url="http://publication.pravo.gov.ru/document/0001202601010001",
     )
-    card = SimpleNamespace(content="Кратко: меняется статья 1.")
+    card = SimpleNamespace(content="Кратко: меняется статья 1.", title="№10-ФЗ — Кратко о законе")
     scored = ScoredCard(
         post_id=1,
         document_id=1,
