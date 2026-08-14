@@ -11,6 +11,7 @@ from explainlaw.db.models import NpaDelta, NpaDocument, NpaSummary
 from explainlaw.gates.delta_gate import FlagDraft
 from explainlaw.gates.text_checks import (
     build_allowed_corpus,
+    count_sentences,
     extract_summary_dates,
     extract_summary_numbers,
     normalize_whitespace,
@@ -91,6 +92,15 @@ def run_summary_gate(
             )
         )
         return SummaryGateResult(passed=False, flags=flags)
+
+    if count_sentences(summary.summary_text) > 2:
+        flags.append(
+            FlagDraft(
+                gate_number=2,
+                flag_type="summary_too_long",
+                flag_details={"message": "Сводка длиннее двух предложений"},
+            )
+        )
 
     if delta is None:
         flags.append(

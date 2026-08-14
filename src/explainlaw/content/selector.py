@@ -7,6 +7,7 @@ from datetime import date
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from explainlaw.content.digest import digest_freshness_start
 from explainlaw.content.scoring import ScoredCard, score_card
 from explainlaw.db.models import NpaDelta, NpaDocument, PostBank, PostItem, PostStatus, PostType
 
@@ -26,7 +27,9 @@ def select_cards_for_digest(
     max_items: int,
     today: date | None = None,
 ) -> list[ScoredCard]:
-    """Карточки single/ready, ещё не попавшие в дайджест."""
+    """Карточки single/ready за актуальный период (текущая + прошедшая календарная неделя)."""
+    today = today or date.today()
+    freshness_start = digest_freshness_start(today)
     used_docs = _documents_in_digests(session)
     rows = session.execute(
         select(PostBank, PostItem, NpaDocument, NpaDelta)
@@ -36,6 +39,7 @@ def select_cards_for_digest(
         .where(
             PostBank.post_type == PostType.single,
             PostBank.status == PostStatus.ready,
+            NpaDocument.publish_date_short >= freshness_start,
         )
         .order_by(NpaDocument.publish_date_short.desc())
     ).all()

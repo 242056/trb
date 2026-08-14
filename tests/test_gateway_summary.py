@@ -57,8 +57,8 @@ def test_generate_summary_mechanical_fallback_on_broken_json(monkeypatch):
         fragment="Статья 1. Текст закона для проверки.",
     )
     assert result.model_route == ModelRoute.qwen
-    assert "Тестовый закон" in result.text
-    assert result.title == "Тестовый закон"
+    assert result.text == "НЕДОСТАТОЧНО ДАННЫХ"
+    assert result.title == ""
 
 
 def test_generate_summary_mechanical_fallback_when_no_clients_available(monkeypatch):
@@ -70,4 +70,4 @@ def test_generate_summary_mechanical_fallback_when_no_clients_available(monkeypa
     )
     assert result.model_route == ModelRoute.qwen
     assert result.title == ""
-    assert "Просто фрагмент текста" in result.text
+    assert result.text == "НЕДОСТАТОЧНО ДАННЫХ"

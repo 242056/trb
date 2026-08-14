@@ -3,6 +3,7 @@ from datetime import date
 from explainlaw.content.digest import _current_week_bounds, _past_week_bounds
 from explainlaw.gates.text_checks import (
     clean_quote_snippet,
+    first_n_sentences,
     fix_ocr_artifacts,
     reflow_soft_linebreaks,
     truncate_at_sentence,
@@ -152,3 +153,9 @@ def test_telegram_format_reflows_and_keeps_html():
     assert "Сторонами концессионного соглашения" in text
     assert "\nконцессионного\n" not in text
     assert 'href="http://publication.pravo.gov.ru/document/0001"' in text
+
+
+def test_first_n_sentences_keeps_complete_thoughts():
+    text = "Первое предложение. Второе предложение. Третье."
+    assert first_n_sentences(text, 2) == "Первое предложение. Второе предложение."
+    assert first_n_sentences("одна мысль без точки", 2) == "одна мысль без точки"

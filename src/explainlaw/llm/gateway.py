@@ -37,38 +37,12 @@ def _clean_title(name: str | None) -> str:
     return title
 
 
-def _fallback_title(name: str | None) -> str:
-    from explainlaw.gates.text_checks import truncate_at_word
-
-    title = _clean_title(name)
-    return truncate_at_word(title, 60) if title else ""
-
-
 def _fallback_summary(
     *, number: str | None, document_date: str | None, name: str | None, fragment: str
 ) -> SummaryResult:
-    """Механическая сводка из предъявленного текста — без генерации знаний."""
-    title = _clean_title(name)
-    header_parts = []
-    if number:
-        header_parts.append(f"Федеральный закон № {number}")
-    if document_date:
-        header_parts.append(f"от {document_date}")
-    header = " ".join(header_parts)
-
-    body = fragment.strip()
-    sentences = re.split(r"(?<=[.!?])\s+", body)
-    excerpt = " ".join(sentences[:3]) if sentences else body[:400]
-    excerpt = excerpt[:500].strip()
-
-    if header and title:
-        text = f"{header}: {title}. {excerpt}"
-    elif title:
-        text = f"{title}. {excerpt}"
-    else:
-        text = excerpt or "Текст закона извлечён; сводка требует ручной проверки."
-
-    return SummaryResult(text=text, title=_fallback_title(name), model_route=ModelRoute.qwen)
+    """Без LLM не выдумываем и не режем сырой текст — карточка уйдёт в разбор."""
+    del number, document_date, name, fragment
+    return SummaryResult(text="НЕДОСТАТОЧНО ДАННЫХ", title="", model_route=ModelRoute.qwen)
 
 
 def generate_summary(

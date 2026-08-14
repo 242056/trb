@@ -117,9 +117,30 @@ def test_format_card_content_has_new_template_fields_no_raw_quotes():
     assert "Принят: 01.01.2026" in content
     assert "Опубликован:" in content
     assert "Вступает в силу:" in content
-    assert "Меняет: 10-ФЗ, ст. 1" in content
+    assert "Меняет: Тестовый закон, ст. 1" in content
     assert "Источник: http://example.com" in content
     assert len(content) < 1000
+
+
+def test_format_card_content_keeps_two_sentences_only():
+    doc = _doc()
+    summary = NpaSummary(
+        document_id=1,
+        summary_text="Первое предложение. Второе предложение. Третье лишнее.",
+    )
+    delta = NpaDelta(document_id=1, completeness_status=DeltaCompleteness.partial, delta_data={"changes": []})
+    content = format_card_content(doc, summary, delta)
+    assert "Первое предложение. Второе предложение." in content
+    assert "Третье лишнее" not in content
+
+
+def test_format_card_content_changes_from_document_name():
+    doc = _doc()
+    doc.name = 'О внесении изменения в статью 11.26 Кодекса Российской Федерации об административных правонарушениях'
+    summary = NpaSummary(document_id=1, summary_text="Изменён состав нарушения.")
+    delta = NpaDelta(document_id=1, completeness_status=DeltaCompleteness.partial, delta_data={"changes": []})
+    content = format_card_content(doc, summary, delta)
+    assert "Меняет: КоАП РФ, ст. 11.26" in content
 
 
 def test_enactment_line_no_dates_no_phrase_falls_back_to_source():
@@ -194,7 +215,21 @@ def test_summary_gate_grounds_numbers():
     assert result.passed
 
 
-def test_summary_gate_flags_insufficient_data():
+def test_summary_gate_flags_too_long():
+    doc = _doc()
+    summary = NpaSummary(
+        document_id=1,
+        summary_text="Первое. Второе. Третье.",
+        model_route=ModelRoute.gateway,
+    )
+    delta = NpaDelta(
+        document_id=1,
+        completeness_status=DeltaCompleteness.partial,
+        delta_data={"changes": [{"target_act": {"number": "10-ФЗ"}, "text_after": "патч"}]},
+    )
+    result = run_summary_gate(doc, summary, delta)
+    assert not result.passed
+    assert any(f.flag_type == "summary_too_long" for f in result.flags)
     doc = _doc()
     summary = NpaSummary(
         document_id=1,
@@ -209,3 +244,20 @@ def test_summary_gate_flags_insufficient_data():
     result = run_summary_gate(doc, summary, delta)
     assert not result.passed
     assert result.flags[0].flag_type == "insufficient_data"
+
+
+def test_summary_gate_flags_too_long():
+    doc = _doc()
+    summary = NpaSummary(
+        document_id=1,
+        summary_text="Первое. Второе. Третье.",
+        model_route=ModelRoute.gateway,
+    )
+    delta = NpaDelta(
+        document_id=1,
+        completeness_status=DeltaCompleteness.partial,
+        delta_data={"changes": [{"target_act": {"number": "10-ФЗ"}, "text_after": "патч"}]},
+    )
+    result = run_summary_gate(doc, summary, delta)
+    assert not result.passed
+    assert any(f.flag_type == "summary_too_long" for f in result.flags)

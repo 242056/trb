@@ -31,6 +31,12 @@ def format_ru_day(day: date) -> str:
     return f"{day.day} {_MONTHS_GENITIVE[day.month - 1]} {day.year}"
 
 
+def digest_freshness_start(today: date) -> date:
+    """Начало актуального периода для отбора: понедельник прошедшей календарной недели."""
+    start, _ = _past_week_bounds(today)
+    return start
+
+
 def digest_title_for_day(day: date) -> str:
     return f"Обзор ФЗ · {format_ru_day(day)}"
 

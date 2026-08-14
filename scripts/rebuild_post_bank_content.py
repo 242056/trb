@@ -26,6 +26,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from sqlalchemy import select, text  # noqa: E402
+from sqlalchemy.orm import selectinload  # noqa: E402
 
 from explainlaw.db.models import (  # noqa: E402
     NpaDelta,
@@ -38,7 +39,7 @@ from explainlaw.db.models import (  # noqa: E402
 )
 from explainlaw.db.session import SessionLocal  # noqa: E402
 from explainlaw.delta.builder import build_delta_for_document  # noqa: E402
-from explainlaw.gates.post_bank import format_card_content  # noqa: E402
+from explainlaw.gates.post_bank import card_title, format_card_content  # noqa: E402
 from explainlaw.gates.text_checks import reflow_soft_linebreaks  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -150,23 +151,28 @@ def _rebuild_single_cards(
             processed += 1
             stats["single_scanned"] += 1
 
-            doc = session.get(NpaDocument, item.document_id)
+            doc = session.execute(
+                select(NpaDocument)
+                .options(selectinload(NpaDocument.enactments), selectinload(NpaDocument.text))
+                .where(NpaDocument.id == item.document_id)
+            ).scalar_one_or_none()
             delta = session.execute(
                 select(NpaDelta).where(NpaDelta.document_id == item.document_id)
             ).scalar_one_or_none()
             summary = session.execute(
                 select(NpaSummary)
                 .where(NpaSummary.document_id == item.document_id)
-                .order_by(NpaSummary.id.asc())
+                .order_by(NpaSummary.id.desc())
                 .limit(1)
             ).scalar_one_or_none()
 
             if not doc or not delta or not summary:
                 continue
 
+            new_title = f"№{doc.number or '—'} — {card_title(doc, summary)}"
             new_content = format_card_content(doc, summary, delta)
             before = post.content or ""
-            if new_content == before:
+            if new_content == before and post.title == new_title:
                 continue
 
             stats["single_dirty"] += 1
@@ -189,6 +195,7 @@ def _rebuild_single_cards(
                 )
             if apply:
                 post.content = new_content
+                post.title = new_title
                 stats["single_updated"] += 1
                 batch_updates += 1
 
@@ -207,12 +214,12 @@ def _rebuild_single_cards(
     return changed_docs
 
 
-def _single_card_content(session, doc_id: int, cache: dict) -> tuple[NpaDocument, str] | None:
-    """Текущее содержимое одиночной карточки документа (уже исправленное или неизменное)."""
+def _single_card_content(session, doc_id: int, cache: dict) -> tuple[NpaDocument, str, str] | None:
+    """Текущие title+content одиночной карточки документа."""
     if doc_id in cache:
         return cache[doc_id]
     row = session.execute(
-        select(NpaDocument, PostBank.content)
+        select(NpaDocument, PostBank.title, PostBank.content)
         .join(PostItem, PostItem.document_id == NpaDocument.id)
         .join(PostBank, PostBank.id == PostItem.post_id)
         .where(NpaDocument.id == doc_id, PostBank.post_type == PostType.single)
@@ -221,8 +228,8 @@ def _single_card_content(session, doc_id: int, cache: dict) -> tuple[NpaDocument
     if row is None:
         cache[doc_id] = None
         return None
-    doc, content = row
-    cache[doc_id] = (doc, content or "")
+    doc, title, content = row
+    cache[doc_id] = (doc, title or "", content or "")
     return cache[doc_id]
 
 
@@ -240,25 +247,24 @@ def _rebuild_digest(post: PostBank, item_document_ids: list[int], changed_docs: 
         cached = cache.get(doc_id)
         if cached is None:
             continue
-        doc, card_content = cached
+        doc, card_title_text, card_content = cached
         idx += 1
-        num = doc.number or "—"
-        title = doc.name or doc.eo_number or ""
-        lines.append(f"{idx}. №{num} — {title}")
-        lines.append(reflow_soft_linebreaks(card_content.strip()))
-        if doc.source_url:
+        lines.append(f"{idx}. {card_title_text}")
+        body = reflow_soft_linebreaks(card_content.strip())
+        lines.append(body)
+        if doc.source_url and doc.source_url not in body:
             lines.append(f"Источник: {doc.source_url}")
         lines.append("")
     return "\n".join(lines).strip()
 
 
 def _rebuild_digests(session, *, changed_docs: dict, batch_size: int, apply: bool, stats: dict, samples: list) -> None:
-    doc_cache: dict[int, tuple[NpaDocument, str] | None] = {}
+    doc_cache: dict[int, tuple[NpaDocument, str, str] | None] = {}
     for doc_id, info in changed_docs.items():
         doc = session.get(NpaDocument, doc_id)
         post = session.get(PostBank, info["post_id"])
         if doc and post:
-            doc_cache[doc_id] = (doc, post.content or "")
+            doc_cache[doc_id] = (doc, post.title or "", post.content or "")
 
     last_id = None
     while True:

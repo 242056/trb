@@ -8,11 +8,25 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from explainlaw.db.models import NpaDelta, NpaDocument, NpaSummary, PostBank, PostItem, PostStatus, PostType
+from explainlaw.extraction.act_identifier import parse_federal_law_references
 from explainlaw.extraction.enactment import mentions_publication_effective
-from explainlaw.gates.text_checks import reflow_soft_linebreaks
+from explainlaw.gates.text_checks import first_n_sentences, reflow_soft_linebreaks, sanitize_article_number
 
 _SEE_SOURCE = "см. первоисточник"
 _MAX_CHANGES_IN_LINE = 3
+_ARTICLE_IN_NAME_RE = re.compile(
+    r"стать(?:ю|и|е|я)\s+(\d+(?:\.\d+)?(?:-\d+)?)",
+    re.IGNORECASE,
+)
+_CODE_ALIASES = (
+    (re.compile(r"кодекс\w*\s+российской федерации об административных правонарушениях|коап", re.I), "КоАП РФ"),
+    (re.compile(r"трудов\w*\s+кодекс", re.I), "Трудовой кодекс РФ"),
+    (re.compile(r"жилищн\w*\s+кодекс", re.I), "Жилищный кодекс РФ"),
+    (re.compile(r"гражданск\w*\s+кодекс", re.I), "Гражданский кодекс РФ"),
+    (re.compile(r"налогов\w*\s+кодекс", re.I), "Налоговый кодекс РФ"),
+    (re.compile(r"семей\w*\s+кодекс", re.I), "Семейный кодекс РФ"),
+    (re.compile(r"уголовн\w*\s+кодекс", re.I), "Уголовный кодекс РФ"),
+)
 
 
 def _short_title(name: str | None) -> str:
@@ -39,23 +53,61 @@ def _enactment_line(doc: NpaDocument) -> str:
     return _SEE_SOURCE
 
 
-def _changes_line(delta: NpaDelta) -> str:
+def _short_act_label(name: str | None, number: str | None = None) -> str:
+    raw = re.sub(r"\s+", " ", (name or "").strip().strip('"«»'))
+    for pattern, alias in _CODE_ALIASES:
+        if pattern.search(raw):
+            return alias
+    if raw:
+        return raw[:80].rstrip(" ,;")
+    return number or "—"
+
+
+def _articles_from_name(name: str | None) -> list[str]:
+    found: list[str] = []
+    for match in _ARTICLE_IN_NAME_RE.finditer(name or ""):
+        article = sanitize_article_number(match.group(1))
+        if article and article not in found:
+            found.append(article)
+    return found
+
+
+def _changes_line(doc: NpaDocument, delta: NpaDelta) -> str:
     changes = delta.delta_data.get("changes") or []
     seen: set[tuple[str, str | None]] = set()
     entries: list[str] = []
+
+    def add(label: str, article: str | None) -> None:
+        key = (label, article)
+        if key in seen or not label:
+            return
+        seen.add(key)
+        entries.append(f"{label}, ст. {article}" if article else label)
+
     for change in changes:
         target = change.get("target_act") or {}
-        act_label = target.get("number") or target.get("name")
-        if not act_label:
+        label = _short_act_label(target.get("name"), target.get("number"))
+        if label == "—":
             continue
-        article = (change.get("unit_address") or {}).get("статья")
-        key = (act_label, article)
-        if key in seen:
-            continue
-        seen.add(key)
-        entries.append(f"{act_label}, ст. {article}" if article else act_label)
+        article = sanitize_article_number((change.get("unit_address") or {}).get("статья"))
+        add(label, article)
         if len(entries) >= _MAX_CHANGES_IN_LINE:
-            break
+            return "; ".join(entries)
+
+    if not entries:
+        refs = parse_federal_law_references(doc.name or "")
+        articles = _articles_from_name(doc.name)
+        if refs:
+            label = _short_act_label(refs[0].get("name"), refs[0].get("number"))
+            if articles:
+                for article in articles[:_MAX_CHANGES_IN_LINE]:
+                    add(label, article)
+            else:
+                add(label, None)
+        elif articles:
+            label = _short_act_label(doc.name)
+            add(label, articles[0])
+
     return "; ".join(entries) if entries else "—"
 
 
@@ -68,9 +120,9 @@ def format_card_content(doc: NpaDocument, summary: NpaSummary, delta: NpaDelta) 
         f"Опубликован: {publish_date}",
         f"Вступает в силу: {_enactment_line(doc)}",
         "",
-        reflow_soft_linebreaks(summary.summary_text.strip()),
+        first_n_sentences(reflow_soft_linebreaks(summary.summary_text.strip()), 2),
         "",
-        f"Меняет: {_changes_line(delta)}",
+        f"Меняет: {_changes_line(doc, delta)}",
     ]
     if doc.source_url:
         lines.append(f"Источник: {doc.source_url}")
@@ -94,13 +146,19 @@ def promote_to_post_bank(
         )
         .limit(1)
     ).scalar_one_or_none()
+    number = doc.number or "—"
+    title = f"№{number} — {card_title(doc, summary)}"
+    content = format_card_content(doc, summary, delta)
     if existing_item:
+        post = session.get(PostBank, existing_item.post_id)
+        if post is not None:
+            post.title = title
+            post.content = content
         return existing_item.post_id, False
 
-    number = doc.number or "—"
     post = PostBank(
-        title=f"№{number} — {card_title(doc, summary)}",
-        content=format_card_content(doc, summary, delta),
+        title=title,
+        content=content,
         post_type=PostType.single,
         status=PostStatus.ready,
     )
