@@ -481,11 +481,14 @@ class DocumentProcessor:
                 self._session.delete(summary)
 
         if (not doc.summaries or self._force) and not self._rebuild_deltas_only:
+            if doc.delta is None:
+                self._session.refresh(doc, ["delta"])
             summary_result = generate_summary(
                 number=doc.number,
                 document_date=doc.document_date.isoformat() if doc.document_date else None,
                 name=doc.name,
                 fragment=fragment,
+                changes=(doc.delta.delta_data.get("changes") if doc.delta else None),
             )
             summary = NpaSummary(
                 document_id=doc.id,

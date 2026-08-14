@@ -39,7 +39,7 @@ from explainlaw.db.models import (  # noqa: E402
 )
 from explainlaw.db.session import SessionLocal  # noqa: E402
 from explainlaw.delta.builder import build_delta_for_document  # noqa: E402
-from explainlaw.gates.post_bank import card_title, format_card_content  # noqa: E402
+from explainlaw.gates.post_bank import format_card_content, format_post_title  # noqa: E402
 from explainlaw.gates.text_checks import reflow_soft_linebreaks  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -169,7 +169,7 @@ def _rebuild_single_cards(
             if not doc or not delta or not summary:
                 continue
 
-            new_title = f"№{doc.number or '—'} — {card_title(doc, summary)}"
+            new_title = format_post_title(doc, summary)
             new_content = format_card_content(doc, summary, delta)
             before = post.content or ""
             if new_content == before and post.title == new_title:

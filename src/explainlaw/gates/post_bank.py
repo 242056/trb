@@ -36,9 +36,26 @@ def _short_title(name: str | None) -> str:
 
 
 def card_title(doc: NpaDocument, summary: NpaSummary) -> str:
-    """Короткий заголовок карточки: приоритет — цепляющий заголовок от Gateway."""
-    title = (summary.title or "").strip()
-    return title if title else _short_title(doc.name)
+    """Короткий заголовок 1b: 5–8 слов сути, не официальное имя закона."""
+    from explainlaw.llm.gateway import looks_like_official_title, sanitize_gist_title
+
+    title = sanitize_gist_title(summary.title)
+    if title:
+        return title
+    gist = first_n_sentences((summary.summary_text or "").strip(), 1)
+    derived = sanitize_gist_title(gist)
+    if derived:
+        return derived
+    short = _short_title(doc.name)
+    if looks_like_official_title(short):
+        return ""
+    return short
+
+
+def format_post_title(doc: NpaDocument, summary: NpaSummary) -> str:
+    number = doc.number or "—"
+    gist = card_title(doc, summary)
+    return f"№{number} — {gist}" if gist else f"№{number}"
 
 
 def _enactment_line(doc: NpaDocument) -> str:
@@ -146,8 +163,7 @@ def promote_to_post_bank(
         )
         .limit(1)
     ).scalar_one_or_none()
-    number = doc.number or "—"
-    title = f"№{number} — {card_title(doc, summary)}"
+    title = format_post_title(doc, summary)
     content = format_card_content(doc, summary, delta)
     if existing_item:
         post = session.get(PostBank, existing_item.post_id)

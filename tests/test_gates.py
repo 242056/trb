@@ -11,7 +11,7 @@ from explainlaw.db.models import (
     TextExtractionMethod,
 )
 from explainlaw.gates.delta_gate import run_delta_gate
-from explainlaw.gates.post_bank import _enactment_line, format_card_content
+from explainlaw.gates.post_bank import _enactment_line, card_title, format_card_content, format_post_title
 from explainlaw.gates.summary_gate import run_summary_gate
 from explainlaw.gates.text_checks import garbage_char_ratio, strip_signature_block, verify_quote_in_source
 
@@ -141,6 +141,20 @@ def test_format_card_content_changes_from_document_name():
     delta = NpaDelta(document_id=1, completeness_status=DeltaCompleteness.partial, delta_data={"changes": []})
     content = format_card_content(doc, summary, delta)
     assert "Меняет: КоАП РФ, ст. 11.26" in content
+
+
+def test_card_title_uses_gist_not_official_name():
+    doc = _doc()
+    doc.name = "О внесении изменений в статью 11.26 Кодекса Российской Федерации об административных правонарушениях"
+    summary = NpaSummary(
+        document_id=1,
+        summary_text="Для перевозчиков без лицензии вырос штраф за пассажиров без документов.",
+        title="О внесении изменений в статью 11.26 КоАП РФ",
+    )
+    assert card_title(doc, summary) == "Для перевозчиков без лицензии вырос штраф за пассажиров"
+    assert format_post_title(doc, summary) == (
+        "№1-ФЗ — Для перевозчиков без лицензии вырос штраф за пассажиров"
+    )
 
 
 def test_enactment_line_no_dates_no_phrase_falls_back_to_source():
