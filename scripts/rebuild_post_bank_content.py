@@ -233,9 +233,11 @@ def _single_card_content(session, doc_id: int, cache: dict) -> tuple[NpaDocument
     return cache[doc_id]
 
 
-def _rebuild_digest(post: PostBank, item_document_ids: list[int], changed_docs: dict, cache: dict) -> str | None:
-    """Пересобрать content дайджеста, если хотя бы один пункт изменился."""
-    if not any(doc_id in changed_docs for doc_id in item_document_ids):
+def _rebuild_digest(
+    post: PostBank, item_document_ids: list[int], changed_docs: dict, cache: dict, *, force: bool
+) -> str | None:
+    """Пересобрать content дайджеста из актуальных одиночных карточек."""
+    if not force and not any(doc_id in changed_docs for doc_id in item_document_ids):
         return None
 
     header_match = re.match(r"^.*\n", post.content or "")
@@ -258,7 +260,9 @@ def _rebuild_digest(post: PostBank, item_document_ids: list[int], changed_docs: 
     return "\n".join(lines).strip()
 
 
-def _rebuild_digests(session, *, changed_docs: dict, batch_size: int, apply: bool, stats: dict, samples: list) -> None:
+def _rebuild_digests(
+    session, *, changed_docs: dict, batch_size: int, apply: bool, stats: dict, samples: list, force: bool = False
+) -> None:
     doc_cache: dict[int, tuple[NpaDocument, str, str] | None] = {}
     for doc_id, info in changed_docs.items():
         doc = session.get(NpaDocument, doc_id)
@@ -293,12 +297,12 @@ def _rebuild_digests(session, *, changed_docs: dict, batch_size: int, apply: boo
                 ).scalars()
             )
             doc_ids = [it.document_id for it in items]
-            if not any(doc_id in changed_docs for doc_id in doc_ids):
+            if not force and not any(doc_id in changed_docs for doc_id in doc_ids):
                 continue
             for doc_id in doc_ids:
                 _single_card_content(session, doc_id, doc_cache)
 
-            new_content = _rebuild_digest(post, doc_ids, changed_docs, doc_cache)
+            new_content = _rebuild_digest(post, doc_ids, changed_docs, doc_cache, force=force)
             if new_content is None or new_content == post.content:
                 continue
 
@@ -335,6 +339,7 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true", help="Only report, no writes")
     parser.add_argument("--apply", action="store_true", help="Write rebuilt content")
     parser.add_argument("--also-digests", action="store_true", help="Also rebuild digests referencing changed docs")
+    parser.add_argument("--digests-only", action="store_true", help="Skip singles; only rebuild digest posts")
     parser.add_argument(
         "--also-rebuild-deltas",
         action="store_true",
@@ -375,20 +380,28 @@ def main() -> int:
                 stats=stats,
             )
 
-        changed_docs = _rebuild_single_cards(
-            session,
-            limit=args.limit,
-            batch_size=args.batch_size,
-            apply=args.apply,
-            only_dirty=args.only_dirty,
-            stats=stats,
-            samples=samples,
-        )
-        logger.info("single cards changed: %s", len(changed_docs))
+        changed_docs: dict = {}
+        if not args.digests_only:
+            changed_docs = _rebuild_single_cards(
+                session,
+                limit=args.limit,
+                batch_size=args.batch_size,
+                apply=args.apply,
+                only_dirty=args.only_dirty,
+                stats=stats,
+                samples=samples,
+            )
+            logger.info("single cards changed: %s", len(changed_docs))
 
-        if args.also_digests and changed_docs:
+        if args.also_digests or args.digests_only:
             _rebuild_digests(
-                session, changed_docs=changed_docs, batch_size=args.batch_size, apply=args.apply, stats=stats, samples=samples
+                session,
+                changed_docs=changed_docs,
+                batch_size=args.batch_size,
+                apply=args.apply,
+                stats=stats,
+                samples=samples,
+                force=True,
             )
 
     print(
