@@ -6,7 +6,14 @@ from pydantic import BaseModel
 from sqlalchemy import desc, func, select
 
 from explainlaw.config import settings
-from explainlaw.db.models import GateStatus, NpaDelta, NpaDocument, NpaSummary, PostBank
+from explainlaw.db.models import (
+    PUBLICATION_POST_TYPES,
+    GateStatus,
+    NpaDelta,
+    NpaDocument,
+    NpaSummary,
+    PostBank,
+)
 from explainlaw.db.session import SessionLocal
 from explainlaw.observability.health import check_health
 
@@ -111,9 +118,12 @@ def list_documents(
 
 def _load_posts(limit: int) -> tuple[int, list[PostBank]]:
     with SessionLocal() as session:
-        total = session.execute(select(func.count()).select_from(PostBank)).scalar_one()
+        total = session.execute(
+            select(func.count()).select_from(PostBank).where(PostBank.post_type.in_(PUBLICATION_POST_TYPES))
+        ).scalar_one()
         rows = session.execute(
             select(PostBank)
+            .where(PostBank.post_type.in_(PUBLICATION_POST_TYPES))
             .order_by(desc(PostBank.created_at))
             .limit(limit)
         ).scalars().all()
@@ -175,7 +185,7 @@ def posts_page(limit: int = Query(default=20, ge=1, le=100)) -> str:
 </head>
 <body>
   <p class="nav"><a href="/">← Законы</a></p>
-  <h1>Банк постов</h1>
+  <h1>Публикации</h1>
   <p class="lead">Всего: {total}</p>
   {body}
 </body>

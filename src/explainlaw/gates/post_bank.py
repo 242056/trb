@@ -1,13 +1,10 @@
-"""Помещение прошедших гейты карточек в банк готовых (§9.3, итерация 4)."""
+"""Сборка текста карточки для дайджеста (в момент публикации, не заранее)."""
 
 from __future__ import annotations
 
 import re
 
-from sqlalchemy import select
-from sqlalchemy.orm import Session
-
-from explainlaw.db.models import NpaDelta, NpaDocument, NpaSummary, PostBank, PostItem, PostStatus, PostType
+from explainlaw.db.models import NpaDelta, NpaDocument, NpaSummary
 from explainlaw.extraction.act_identifier import parse_federal_law_references
 from explainlaw.extraction.enactment import mentions_publication_effective
 from explainlaw.gates.text_checks import first_n_sentences, reflow_soft_linebreaks, sanitize_article_number
@@ -144,41 +141,3 @@ def format_card_content(doc: NpaDocument, summary: NpaSummary, delta: NpaDelta) 
     if doc.source_url:
         lines.append(f"Источник: {doc.source_url}")
     return "\n".join(lines)
-
-
-def promote_to_post_bank(
-    session: Session,
-    *,
-    doc: NpaDocument,
-    summary: NpaSummary,
-    delta: NpaDelta,
-) -> tuple[int | None, bool]:
-    """Создаёт карточку в post_bank, если её ещё нет. Возвращает (post_id, created)."""
-    existing_item = session.execute(
-        select(PostItem)
-        .join(PostBank, PostBank.id == PostItem.post_id)
-        .where(
-            PostItem.document_id == doc.id,
-            PostBank.post_type == PostType.single,
-        )
-        .limit(1)
-    ).scalar_one_or_none()
-    title = format_post_title(doc, summary)
-    content = format_card_content(doc, summary, delta)
-    if existing_item:
-        post = session.get(PostBank, existing_item.post_id)
-        if post is not None:
-            post.title = title
-            post.content = content
-        return existing_item.post_id, False
-
-    post = PostBank(
-        title=title,
-        content=content,
-        post_type=PostType.single,
-        status=PostStatus.ready,
-    )
-    session.add(post)
-    session.flush()
-    session.add(PostItem(post_id=post.id, document_id=doc.id, order_index=0))
-    return post.id, True

@@ -19,6 +19,7 @@ from explainlaw.db.models import (
     NpaSummary,
     NpaText,
     PipelineJobType,
+    PUBLICATION_POST_TYPES,
     PostBank,
     PostStatus,
 )
@@ -324,12 +325,18 @@ def cmd_status(args: argparse.Namespace) -> int:
         with_delta = session.execute(select(func.count()).select_from(NpaDelta)).scalar_one()
         missing_acts = session.execute(select(func.count()).select_from(MissingActsQueue)).scalar_one()
         gate_flags = session.execute(select(func.count()).select_from(GateFlag)).scalar_one()
-        post_bank = session.execute(select(func.count()).select_from(PostBank)).scalar_one()
+        post_bank = session.execute(
+            select(func.count()).select_from(PostBank).where(PostBank.post_type.in_(PUBLICATION_POST_TYPES))
+        ).scalar_one()
         post_ready = session.execute(
-            select(func.count()).select_from(PostBank).where(PostBank.status == PostStatus.ready)
+            select(func.count())
+            .select_from(PostBank)
+            .where(PostBank.status == PostStatus.ready, PostBank.post_type.in_(PUBLICATION_POST_TYPES))
         ).scalar_one()
         post_published = session.execute(
-            select(func.count()).select_from(PostBank).where(PostBank.status == PostStatus.published)
+            select(func.count())
+            .select_from(PostBank)
+            .where(PostBank.status == PostStatus.published, PostBank.post_type.in_(PUBLICATION_POST_TYPES))
         ).scalar_one()
         gate_passed = session.execute(
             select(func.count()).select_from(NpaSummary).where(NpaSummary.gate_status == GateStatus.passed)
@@ -434,7 +441,7 @@ def main() -> None:
     )
     p_process.set_defaults(func=cmd_process)
 
-    p_gate = sub.add_parser("gate", help="Гейты качества (дельта + сводка) → post_bank")
+    p_gate = sub.add_parser("gate", help="Гейты качества (дельта + сводка)")
     p_gate.add_argument("--limit", type=int, help="Проверить не более N документов")
     p_gate.add_argument("--force", action="store_true", help="Перепроверить уже проверенные")
     p_gate.add_argument(
@@ -444,7 +451,7 @@ def main() -> None:
     )
     p_gate.set_defaults(func=cmd_gate)
 
-    p_publish = sub.add_parser("publish", help="Собрать ежедневную сводку из post_bank (§7.2)")
+    p_publish = sub.add_parser("publish", help="Собрать и опубликовать ежедневную сводку (§7.2)")
     p_publish.add_argument("--min-items", type=int, help="Минимум карточек для полного дайджеста")
     p_publish.add_argument("--max-items", type=int, help="Максимум карточек в дайджесте")
     p_publish.add_argument("--dry-run", action="store_true", help="Только показать отбор, без записи")

@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
-"""Перегенерировать title+summary карточек через Gateway (без OCR и без Telegram).
+"""Перегенерировать title+summary документов через LLM (без OCR, без post_bank, без Telegram).
 
-Берёт уже сохранённый npa_text + delta, пишет npa_summary и пересобирает
-post_bank single в шаблон 1b. Дайджесты — опционально (--also-digests).
+Пишет только npa_summary. Текст карточки собирается при publish из сводки+дельты.
 
 Примеры:
   python scripts/refresh_card_summaries.py --dry-run --limit 20
   python scripts/refresh_card_summaries.py --apply --limit 3
-  python scripts/refresh_card_summaries.py --apply --also-digests --limit 6000
+  python scripts/refresh_card_summaries.py --apply --limit 6000
 """
 
 from __future__ import annotations
@@ -63,7 +62,7 @@ from explainlaw.db.models import (  # noqa: E402
 )
 from explainlaw.db.session import SessionLocal  # noqa: E402
 from explainlaw.extraction.fragment import extract_summary_fragment  # noqa: E402
-from explainlaw.gates.post_bank import format_card_content, format_post_title  # noqa: E402
+from explainlaw.gates.post_bank import format_post_title  # noqa: E402
 from explainlaw.llm.factory import create_gateway_client, create_qwen_client  # noqa: E402
 from explainlaw.llm.gateway import generate_summary, needs_gist_refresh  # noqa: E402
 
@@ -247,8 +246,7 @@ def main() -> int:
                 summary.summary_text = result.text
                 summary.title = result.title
                 summary.model_route = result.model_route
-                post.title = format_post_title(doc, summary)
-                post.content = format_card_content(doc, summary, delta)
+                new_title = format_post_title(doc, summary)
                 changed_doc_ids.add(doc.id)
                 stats["refreshed"] += 1
                 batch_updates += 1
@@ -257,11 +255,11 @@ def main() -> int:
                         {
                             "post_id": post.id,
                             "eo_number": doc.eo_number,
-                            "new_title": post.title,
+                            "new_title": new_title,
                             "new_summary": re_preview(result.text),
                         }
                     )
-                logger.info("refreshed eo=%s post_id=%s title=%s", doc.eo_number, post.id, post.title)
+                logger.info("refreshed eo=%s post_id=%s title=%s", doc.eo_number, post.id, new_title)
                 if args.sleep:
                     time.sleep(args.sleep)
 

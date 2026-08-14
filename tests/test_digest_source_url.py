@@ -11,13 +11,12 @@ def test_digest_includes_source_url():
         eo_number="0001202601010001",
         source_url="http://publication.pravo.gov.ru/document/0001202601010001",
     )
-    card = SimpleNamespace(content="Кратко: меняется статья 1.", title="№10-ФЗ — Кратко о законе")
     scored = ScoredCard(
-        post_id=1,
         document_id=1,
         document=doc,  # type: ignore[arg-type]
         delta=None,
-        card=card,  # type: ignore[arg-type]
+        title="№10-ФЗ — Кратко о законе",
+        content="Кратко: меняется статья 1.",
         score=1.0,
     )
     text = build_digest_content([scored], week_label="2026-07-13 — 2026-07-19")

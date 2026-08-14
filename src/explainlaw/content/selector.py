@@ -1,15 +1,24 @@
-"""Отбор карточек из банка готовых (§7.2)."""
+"""Отбор законов для дайджеста: прошедшие гейты документы, не заранее свёрстанные карточки."""
 
 from __future__ import annotations
 
 from datetime import date
 
-from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session, selectinload
 
 from explainlaw.content.digest import digest_freshness_start
 from explainlaw.content.scoring import ScoredCard, score_card
-from explainlaw.db.models import NpaDelta, NpaDocument, PostBank, PostItem, PostStatus, PostType
+from explainlaw.db.models import (
+    GateStatus,
+    NpaDelta,
+    NpaDocument,
+    NpaSummary,
+    PostBank,
+    PostItem,
+    PostType,
+)
+from explainlaw.gates.post_bank import format_card_content, format_post_title
 
 
 def _documents_in_digests(session: Session) -> set[int]:
@@ -27,37 +36,43 @@ def select_cards_for_digest(
     max_items: int,
     today: date | None = None,
 ) -> list[ScoredCard]:
-    """Карточки single/ready за актуальный период (текущая + прошедшая календарная неделя)."""
+    """Документы с прошедшими гейтами за текущую + прошедшую календарную неделю."""
     today = today or date.today()
     freshness_start = digest_freshness_start(today)
     used_docs = _documents_in_digests(session)
+    latest_summary_id = (
+        select(func.max(NpaSummary.id))
+        .where(NpaSummary.document_id == NpaDocument.id)
+        .correlate(NpaDocument)
+        .scalar_subquery()
+    )
     rows = session.execute(
-        select(PostBank, PostItem, NpaDocument, NpaDelta)
-        .join(PostItem, PostItem.post_id == PostBank.id)
-        .join(NpaDocument, NpaDocument.id == PostItem.document_id)
-        .outerjoin(NpaDelta, NpaDelta.document_id == NpaDocument.id)
+        select(NpaDocument, NpaSummary, NpaDelta)
+        .join(NpaSummary, NpaSummary.document_id == NpaDocument.id)
+        .join(NpaDelta, NpaDelta.document_id == NpaDocument.id)
+        .options(selectinload(NpaDocument.enactments), selectinload(NpaDocument.text))
         .where(
-            PostBank.post_type == PostType.single,
-            PostBank.status == PostStatus.ready,
+            NpaSummary.id == latest_summary_id,
+            NpaSummary.gate_status == GateStatus.passed,
             NpaDocument.publish_date_short >= freshness_start,
         )
         .order_by(NpaDocument.publish_date_short.desc())
     ).all()
 
     scored: list[ScoredCard] = []
-    for card, item, doc, delta in rows:
-        if doc.id in used_docs:
+    for doc, summary, delta in rows:
+        if doc.id in used_docs or doc.included_in_post:
             continue
-        if doc.included_in_post:
-            continue
+        title = format_post_title(doc, summary)
+        content = format_card_content(doc, summary, delta)
         scored.append(
             ScoredCard(
-                post_id=card.id,
                 document_id=doc.id,
                 document=doc,
                 delta=delta,
-                card=card,
-                score=score_card(doc=doc, delta=delta, card=card, today=today),
+                title=title,
+                content=content,
+                score=score_card(doc=doc, delta=delta, today=today, content_len=len(content)),
             )
         )
 

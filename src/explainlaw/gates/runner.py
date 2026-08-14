@@ -16,13 +16,11 @@ from explainlaw.db.models import (
     NpaDelta,
     NpaDocument,
     NpaSummary,
-    NpaText,
 )
 from explainlaw.extraction.changes import is_amendment_law
 from explainlaw.gates.delta_gate import run_delta_gate
-from explainlaw.gates.post_bank import promote_to_post_bank
 from explainlaw.gates.summary_gate import run_summary_gate
-from explainlaw.pipeline.topics import TOPIC_GATE_RESULT, TOPIC_POST_READY
+from explainlaw.pipeline.topics import TOPIC_GATE_RESULT
 
 logger = logging.getLogger(__name__)
 
@@ -178,10 +176,8 @@ class GateRunner:
         self._publish(TOPIC_GATE_RESULT, payload)
 
         if passed and delta:
-            _, created = promote_to_post_bank(self._session, doc=doc, summary=summary, delta=delta)
-            self._publish(TOPIC_POST_READY, payload)
-            logger.info("Гейты пройдены: %s", doc.eo_number)
-            return "passed", created
+            logger.info("Гейты пройдены: %s (карточка соберётся при publish)", doc.eo_number)
+            return "passed", False
 
         logger.info("Гейты: флаги для %s (%d)", doc.eo_number, len(all_flags))
         return "flagged", False
