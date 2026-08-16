@@ -42,11 +42,24 @@ def format_post_for_telegram(*, title: str, content: str) -> str:
     from explainlaw.gates.text_checks import reflow_soft_linebreaks
 
     body = reflow_soft_linebreaks((content or "").strip())
+    body = escape(body)
+    # Поля карточки и заголовки пунктов — жирным
+    body = re.sub(
+        r"(?m)^(Принят|Опубликован|Вступает в силу|Меняет):",
+        r"<b>\1:</b>",
+        body,
+    )
+    body = re.sub(r"(?m)^(\d+\.\s+.+)$", r"<b>\1</b>", body)
+    body = re.sub(
+        r"(?m)^(Свежие федеральные законы(?:\s+\([^)]*\))?)$",
+        r"<b>\1</b>",
+        body,
+    )
     # «Источник: url» → кликабельная ссылка
     body = re.sub(
         r"(?m)^Источник:\s+(https?://\S+)\s*$",
         r'🔗 <a href="\1">Источник</a>',
-        escape(body),
+        body,
     )
     head = f"<b>{escape(title.strip())}</b>" if title else "<b>ExplainLaw</b>"
     return f"{head}\n\n{body}"

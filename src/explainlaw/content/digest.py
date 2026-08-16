@@ -67,6 +67,9 @@ def build_digest_content(
     label = period_label or week_label or ""
     lines = [f"Свежие федеральные законы ({label})", ""]
     for idx, card in enumerate(cards, start=1):
+        if idx > 1:
+            lines.append("---")
+            lines.append("")
         doc = card.document
         body = reflow_soft_linebreaks(card.content.strip())
         lines.append(f"{idx}. {card.title}")
