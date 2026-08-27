@@ -1,4 +1,5 @@
 import logging
+from dataclasses import dataclass
 from datetime import date
 from typing import Any
 from uuid import UUID
@@ -7,11 +8,23 @@ import httpx
 
 from explainlaw.collector.repository import parse_api_date
 from explainlaw.config import settings
-from explainlaw.pravo.models import PravoDocumentItem, PravoDocumentsPage, RefItem
+from explainlaw.pravo.models import PravoDocumentsPage, RefItem
 
 logger = logging.getLogger(__name__)
 
 PAGE_SIZES = (10, 30, 100, 200)
+
+
+@dataclass(frozen=True)
+class PravoTarget:
+    """Документный тип портала для сбора: блок + тип (GUID или имя для резолва)."""
+
+    block: str
+    type_id: UUID | None = None
+    type_name: str | None = None
+
+    def key(self) -> str:
+        return f"{self.block}:{self.type_id or self.type_name}"
 
 
 class PravoApiClient:
@@ -41,13 +54,70 @@ class PravoApiClient:
         response.raise_for_status()
         return [RefItem.model_validate(item) for item in response.json()]
 
+    def get_signatory_authorities(self, *, block: str | None = None) -> list[RefItem]:
+        params = {"block": block} if block else None
+        response = self._client.get("/api/SignatoryAuthorities", params=params)
+        response.raise_for_status()
+        return [RefItem.model_validate(item) for item in response.json()]
+
+    def document_type_name(self, type_id: UUID) -> str | None:
+        """Имя типа документа по GUID (поиск по одному запросу на каждый блок)."""
+        for block in self._known_blocks:
+            for item in self.get_document_types(block=block):
+                if item.id == type_id:
+                    return item.name
+        return None
+
+    def signatory_authority_name(self, authority_id: UUID) -> str | None:
+        for block in self._known_blocks:
+            try:
+                for item in self.get_signatory_authorities(block=block):
+                    if item.id == authority_id:
+                        return item.name
+            except Exception:
+                continue
+        return None
+
+    @property
+    def _known_blocks(self) -> list[str]:
+        return list(dict.fromkeys([t.block for t in self.collect_targets()]))
+
     def resolve_fz_type_id(self) -> UUID:
-        if settings.pravo_document_type_fz_id:
-            return UUID(settings.pravo_document_type_fz_id)
-        for item in self.get_document_types(block=settings.pravo_block_president):
-            if item.name == "Федеральный закон":
+        return self.resolve_target_type_id(self.base_target())
+
+    def resolve_target_type_id(self, target: PravoTarget) -> UUID:
+        """GUID типа документа: из target.type_id или по имени типа внутри target.block."""
+        if target.type_id is not None:
+            return target.type_id
+        needle = (target.type_name or "").strip()
+        if not needle:
+            raise RuntimeError(f"Цель {target.key()} не задаёт ни type_id, ни type_name")
+        for item in self.get_document_types(block=target.block):
+            if item.name.lower() == needle.lower():
                 return item.id
-        raise RuntimeError("Не найден GUID вида «Федеральный закон» в /api/DocumentTypes")
+        raise RuntimeError(
+            f"Не найден GUID типа «{needle}» в блоке «{target.block}» на /api/DocumentTypes"
+        )
+
+    def collect_targets(self) -> list[PravoTarget]:
+        """Цели сбора из конфига: наборы блоков/типов, выровненные по порядку."""
+        blocks = [b.strip() for b in settings.pravo_collect_blocks.split("|") if b.strip()]
+        names = [t.strip() for t in settings.pravo_collect_types.split("|") if t.strip()]
+        if len(blocks) != len(names):
+            raise RuntimeError(
+                "pravo_collect_blocks и pravo_collect_types должны иметь одинаковое число элементов "
+                f"(получено {len(blocks)} и {len(names)})"
+            )
+        targets: list[PravoTarget] = []
+        for block, name in zip(blocks, names):
+            is_fz = name.lower() == "федеральный закон"
+            type_id = UUID(settings.pravo_document_type_fz_id) if is_fz else None
+            targets.append(PravoTarget(block=block, type_id=type_id, type_name=None if is_fz else name))
+        return targets
+
+    def base_target(self) -> PravoTarget:
+        """Базовый (первый) тип набора — эталон каталога/дефолта."""
+        return self.collect_targets()[0]
 
     def list_documents_page(
         self,
@@ -90,22 +160,23 @@ class PravoApiClient:
         response.raise_for_status()
         return PravoDocumentsPage.model_validate(response.json())
 
-    def iter_federal_laws(
+    def iter_documents(
         self,
+        target: PravoTarget,
         *,
         period_type: str = "daily",
         target_date: date | None = None,
-        fz_type_id: UUID | None = None,
     ):
-        """Итератор ФЗ с клиентской фильтрацией — API не всегда фильтрует тип/дату на сервере."""
-        fz_id = fz_type_id or self.resolve_fz_type_id()
+        """Итератор документов одного типа с клиентской фильтрацией —
+        API не всегда фильтрует тип/дату на сервере."""
+        type_id = self.resolve_target_type_id(target)
         effective_period = "Day" if target_date else period_type
         page = 1
 
         while True:
             result = self.list_documents_page(
-                block=settings.pravo_block_president,
-                document_type_id=fz_id,
+                block=target.block,
+                document_type_id=type_id,
                 period_type=effective_period,
                 target_date=target_date,
                 page_index=page,
@@ -115,7 +186,7 @@ class PravoApiClient:
                 break
 
             for item in result.items:
-                if item.document_type_id != fz_id:
+                if item.document_type_id != type_id:
                     continue
                 if target_date is not None:
                     pub_date = parse_api_date(item.publish_date_short)
@@ -134,23 +205,23 @@ class PravoApiClient:
                 break
             page += 1
 
-    def iter_all_federal_laws(
+    def iter_all_documents(
         self,
+        target: PravoTarget,
         *,
-        fz_type_id: UUID | None = None,
         publish_date_from: date | None = None,
         publish_date_to: date | None = None,
     ):
-        """Полный каталог ФЗ блока president — ~95 страниц API, данные с 2011 года.
+        """Полный каталог документов одного типа в блоке — данные с ~2011 года.
 
         Официальный API не отдаёт ФЗ до ~2011; это граница источника, не баг сборщика.
         """
-        fz_id = fz_type_id or self.resolve_fz_type_id()
+        type_id = self.resolve_target_type_id(target)
         page = 1
 
         while True:
             result = self.list_documents_page(
-                block=settings.pravo_block_president,
+                block=target.block,
                 document_type_id=None,
                 period_type=None,
                 publish_date_from=publish_date_from,
@@ -162,7 +233,7 @@ class PravoApiClient:
                 break
 
             for item in result.items:
-                if item.document_type_id != fz_id:
+                if item.document_type_id != type_id:
                     continue
                 pub_date = parse_api_date(item.publish_date_short)
                 if publish_date_from and pub_date and pub_date < publish_date_from:
@@ -174,6 +245,40 @@ class PravoApiClient:
             if page >= result.pages_total_count:
                 break
             page += 1
+
+    def iter_federal_laws(
+        self,
+        *,
+        period_type: str = "daily",
+        target_date: date | None = None,
+        fz_type_id: UUID | None = None,
+    ):
+        """Итератор базового типа набора (ФЗ по умолчанию)."""
+        target = self.base_target()
+        if fz_type_id is not None:
+            target = PravoTarget(block=target.block, type_id=fz_type_id)
+        yield from self.iter_documents(
+            target,
+            period_type=period_type,
+            target_date=target_date,
+        )
+
+    def iter_all_federal_laws(
+        self,
+        *,
+        fz_type_id: UUID | None = None,
+        publish_date_from: date | None = None,
+        publish_date_to: date | None = None,
+    ):
+        """Полный каталог базового типа набора (ФЗ по умолчанию)."""
+        target = self.base_target()
+        if fz_type_id is not None:
+            target = PravoTarget(block=target.block, type_id=fz_type_id)
+        yield from self.iter_all_documents(
+            target,
+            publish_date_from=publish_date_from,
+            publish_date_to=publish_date_to,
+        )
 
     def count_catalog_federal_laws(self, *, fz_type_id: UUID | None = None) -> int:
         return sum(1 for _ in self.iter_all_federal_laws(fz_type_id=fz_type_id))

@@ -29,6 +29,7 @@ class CollectStats:
     error_details: list[str] = field(default_factory=list)
     date_from: str | None = None
     date_to: str | None = None
+    by_type: dict[str, dict[str, int]] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
@@ -40,6 +41,7 @@ class CollectStats:
             "error_details": self.error_details,
             "date_from": self.date_from,
             "date_to": self.date_to,
+            "by_type": self.by_type,
         }
 
 
@@ -101,14 +103,14 @@ class DailyCollector:
 
         stats = CollectStats()
         sync_reference_data(self._session, self._pravo)
-        fz_type_id = self._pravo.resolve_fz_type_id()
 
-        for item in self._pravo.iter_federal_laws(
-            period_type=period_type if target_date is None else "day",
-            target_date=target_date,
-            fz_type_id=fz_type_id,
-        ):
-            self._ingest_or_skip(item, stats)
+        for target in self._pravo.collect_targets():
+            self._collect_target(
+                target,
+                period_type=period_type if target_date is None else "day",
+                target_date=target_date,
+                stats=stats,
+            )
 
         self._session.commit()
         return stats
@@ -119,22 +121,27 @@ class DailyCollector:
         date_from: date | None = None,
         date_to: date | None = None,
     ) -> CollectStats:
-        """Сбор всего каталога ФЗ из API (§3 ТЗ) — публикации president, не бэкофилл изменяемых актов (§8.3)."""
+        """Полный каталог всех целей сбора из API (§3 ТЗ) — публикации president/government,
+        не бэкофилл изменяемых актов (§8.3)."""
         stats = CollectStats()
         sync_reference_data(self._session, self._pravo)
-        fz_type_id = self._pravo.resolve_fz_type_id()
 
-        logger.info(
-            "Полный каталог API: ~%d ФЗ (официальный источник, данные с ~2011 года)",
-            settings.pravo_catalog_fz_total,
-        )
-
-        for item in self._pravo.iter_all_federal_laws(
-            fz_type_id=fz_type_id,
-            publish_date_from=date_from,
-            publish_date_to=date_to,
-        ):
-            self._ingest_or_skip(item, stats)
+        for target in self._pravo.collect_targets():
+            logger.info(
+                "Полный каталог API: %s — %s (официальный источник, данные с ~2011 года)",
+                target.block,
+                target.key(),
+            )
+            seen: set[str] = set()
+            for item in self._pravo.iter_all_documents(
+                target,
+                publish_date_from=date_from,
+                publish_date_to=date_to,
+            ):
+                if item.eo_number in seen:
+                    continue
+                seen.add(item.eo_number)
+                self._ingest_or_skip(item, stats, type_key=target.key())
 
         self._session.commit()
         return stats
@@ -148,17 +155,17 @@ class DailyCollector:
             date_to=date_to.isoformat(),
         )
         sync_reference_data(self._session, self._pravo)
-        fz_type_id = self._pravo.resolve_fz_type_id()
 
         current = date_from
         while current <= date_to:
-            logger.info("Сбор ФЗ за %s", current.isoformat())
-            for item in self._pravo.iter_federal_laws(
-                period_type="day",
-                target_date=current,
-                fz_type_id=fz_type_id,
-            ):
-                self._ingest_or_skip(item, stats)
+            logger.info("Сбор за %s", current.isoformat())
+            for target in self._pravo.collect_targets():
+                self._collect_target(
+                    target,
+                    period_type="day",
+                    target_date=current,
+                    stats=stats,
+                )
             current += timedelta(days=1)
 
         self._session.commit()
@@ -172,39 +179,77 @@ class DailyCollector:
         self._session.commit()
         return True
 
-    def _ingest_or_skip(self, item: PravoDocumentItem, stats: CollectStats) -> None:
+    def _collect_target(
+        self,
+        target,
+        *,
+        period_type: str,
+        target_date: date | None,
+        stats: CollectStats,
+    ) -> None:
+        logger.info("Сбор типа %s", target.key())
+        seen: set[str] = set()
+        for item in self._pravo.iter_documents(
+            target,
+            period_type=period_type,
+            target_date=target_date,
+        ):
+            if item.eo_number in seen:
+                continue
+            seen.add(item.eo_number)
+            self._ingest_or_skip(item, stats, type_key=target.key())
+
+    def _ingest_or_skip(
+        self,
+        item: PravoDocumentItem,
+        stats: CollectStats,
+        *,
+        type_key: str | None = None,
+    ) -> None:
         stats.fetched += 1
         if self._repo.exists(item.eo_number):
             stats.skipped += 1
+            self._bump_type(stats, type_key, "skipped", 1)
             if stats.skipped % 500 == 0:
                 logger.info("Пропущено (уже в базе): %d, новых: %d", stats.skipped, stats.new)
             return
         try:
             has_pdf = self._ingest_item(item)
             stats.new += 1
+            self._bump_type(stats, type_key, "new", 1)
             if not has_pdf:
                 stats.no_pdf += 1
             self._session.commit()
             if has_pdf:
-                logger.info("Сохранён новый ФЗ: %s — %s", item.eo_number, item.name)
+                logger.info("Сохранён новый документ: %s — %s", item.eo_number, item.name)
             else:
                 logger.info(
-                    "Сохранён новый ФЗ без PDF (метаданные): %s — %s",
+                    "Сохранён новый документ без PDF (метаданные): %s — %s",
                     item.eo_number,
                     item.name,
                 )
         except Exception as exc:
             stats.errors += 1
+            self._bump_type(stats, type_key, "errors", 1)
             msg = f"{item.eo_number}: {exc}"
             stats.error_details.append(msg)
             logger.exception("Ошибка при сохранении %s", item.eo_number)
             self._session.rollback()
 
+    @staticmethod
+    def _bump_type(stats: CollectStats, type_key: str | None, field: str, amount: int) -> None:
+        if not type_key:
+            return
+        bucket = stats.by_type.setdefault(type_key, {})
+        bucket[field] = bucket.get(field, 0) + amount
+
     def _ingest_item(self, item: PravoDocumentItem) -> bool:
         """Сохраняет документ. Возвращает True, если PDF тоже сохранён."""
         source_url = self._pravo.document_url(item.eo_number)
         raw_api = item.raw_dict()
-        doc = self._repo.create_document(item, source_url=source_url, raw_api=raw_api)
+        doc = self._repo.create_document(
+            item, source_url=source_url, raw_api=raw_api, pravo=self._pravo
+        )
 
         try:
             raw_data, kind = self._pravo.download_raw_file(item.eo_number)

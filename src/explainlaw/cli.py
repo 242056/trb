@@ -365,7 +365,10 @@ def cmd_status(args: argparse.Namespace) -> int:
     print(json.dumps(
         {
             "catalog_api_total": in_api,
-            "catalog_note": "Официальный API publication.pravo.gov.ru, ФЗ с ~2011 года (граница источника)",
+            "catalog_note": (
+                "Официальный API publication.pravo.gov.ru, базовый тип (ФЗ) с ~2011 года "
+                "(граница источника)"
+            ),
             "in_database": in_db,
             "with_text": with_text,
             "with_summary": with_summary,
@@ -399,7 +402,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(prog="explainlaw", description="ExplainLaw — Шаг 1")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p_collect = sub.add_parser("collect", help="Ежедневный сбор ФЗ с publication.pravo.gov.ru")
+    p_collect = sub.add_parser(
+        "collect", help="Ежедневный сбор документов с publication.pravo.gov.ru (ФЗ, указы, постановления)"
+    )
     p_collect.add_argument("--date", help="Один день: YYYY-MM-DD")
     p_collect.add_argument("--from", dest="date_from", help="Начало диапазона YYYY-MM-DD")
     p_collect.add_argument("--to", dest="date_to", help="Конец диапазона YYYY-MM-DD")
@@ -412,7 +417,7 @@ def main() -> None:
         "--all",
         dest="all_catalog",
         action="store_true",
-        help="Весь каталог ФЗ из API (~7700 с 2011 г.). Дедуп по eoNumber, можно запускать повторно",
+        help="Весь каталог из API (ФЗ, указы, постановления). Дедуп по eoNumber, можно запускать повторно",
     )
     p_collect.add_argument(
         "--period",
@@ -422,7 +427,7 @@ def main() -> None:
     )
     p_collect.set_defaults(func=cmd_collect)
 
-    p_list = sub.add_parser("list", help="Список собранных ФЗ")
+    p_list = sub.add_parser("list", help="Список собранных документов")
     p_list.add_argument("--limit", type=int, default=20)
     p_list.set_defaults(func=cmd_list)
 
