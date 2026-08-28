@@ -71,10 +71,13 @@ class MissingActStatus(str, enum.Enum):
 
 class PostType(str, enum.Enum):
     digest = "digest"
-    single = "single"
+    single = "single"  # legacy: больше не создаём, отбор идёт из документов
     enactment_week = "enactment_week"
     mini_digest = "mini_digest"
     analysis = "analysis"
+
+
+PUBLICATION_POST_TYPES = (PostType.digest, PostType.mini_digest, PostType.enactment_week)
 
 
 class PostStatus(str, enum.Enum):
@@ -452,7 +455,7 @@ class MissingActsQueue(Base):
 
 
 class PostBank(Base):
-    """Банк готовых карточек и публикаций."""
+    """Фактические публикации (дайджест / тихий день), не склад одиночных карточек."""
 
     __tablename__ = "post_bank"
     __table_args__ = (Index("ix_post_bank_status", "status"),)

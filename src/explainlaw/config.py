@@ -46,6 +46,11 @@ class Settings(BaseSettings):
     llm_request_timeout: float = 300.0
 
     pravo_api_base_url: str = "http://publication.pravo.gov.ru"
+    # Блоки портала и типы документов, собираемые конвейером. Наборы выровнены по порядку:
+    # i-й тип берётся из i-го блока. Первый элемент набора — базовый тип (ФЗ по умолчанию),
+    # он используется как эталон для `--all`, `status` и поиска недостающих актов.
+    pravo_collect_blocks: str = "president|president|government"
+    pravo_collect_types: str = "Федеральный закон|Указ|Постановление"
     pravo_block_president: str = "president"
     pravo_document_type_fz_id: str = "82a8bf1c-3bc7-47ed-827f-7affd43a7f27"
     pravo_catalog_fz_total: int = 7761

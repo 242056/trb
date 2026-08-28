@@ -29,6 +29,12 @@ class SummaryResult:
     model_route: ModelRoute
 
 
+_OFFICIAL_TITLE_RE = re.compile(
+    r"^\s*(?:федеральный закон|о внесении изменен)",
+    re.IGNORECASE,
+)
+
+
 def _clean_title(name: str | None) -> str:
     if not name:
         return ""
@@ -37,38 +43,62 @@ def _clean_title(name: str | None) -> str:
     return title
 
 
-def _fallback_title(name: str | None) -> str:
-    from explainlaw.gates.text_checks import truncate_at_word
+def looks_like_official_title(title: str | None) -> bool:
+    """Официальное название поправки — не заголовок 1b (5–8 слов сути)."""
+    cleaned = _clean_title(title)
+    if not cleaned:
+        return True
+    if _OFFICIAL_TITLE_RE.search(cleaned):
+        return True
+    return len(cleaned.split()) > 12
 
-    title = _clean_title(name)
-    return truncate_at_word(title, 60) if title else ""
+
+def sanitize_gist_title(title: str | None) -> str:
+    cleaned = _clean_title(title)
+    if not cleaned or _OFFICIAL_TITLE_RE.search(cleaned):
+        return ""
+    words = cleaned.split()
+    if len(words) > 8:
+        return " ".join(words[:8])
+    return cleaned
+
+
+def needs_gist_refresh(*, title: str | None, summary_text: str | None) -> bool:
+    """Старые сводки: официальное имя, дамп «Федеральный закон №…», больше 2 фраз."""
+    from explainlaw.gates.text_checks import count_sentences
+
+    if looks_like_official_title(title):
+        return True
+    text = re.sub(r"\s+", " ", (summary_text or "").strip())
+    if not text or text.upper().startswith("НЕДОСТАТОЧНО ДАННЫХ"):
+        return True
+    if _OFFICIAL_TITLE_RE.search(text):
+        return True
+    if count_sentences(text) > 2:
+        return True
+    return len(text) > 600
 
 
 def _fallback_summary(
     *, number: str | None, document_date: str | None, name: str | None, fragment: str
 ) -> SummaryResult:
-    """Механическая сводка из предъявленного текста — без генерации знаний."""
-    title = _clean_title(name)
-    header_parts = []
-    if number:
-        header_parts.append(f"Федеральный закон № {number}")
-    if document_date:
-        header_parts.append(f"от {document_date}")
-    header = " ".join(header_parts)
+    """Без LLM не выдумываем и не режем сырой текст — карточка уйдёт в разбор."""
+    del number, document_date, name, fragment
+    return SummaryResult(text="НЕДОСТАТОЧНО ДАННЫХ", title="", model_route=ModelRoute.qwen)
 
-    body = fragment.strip()
-    sentences = re.split(r"(?<=[.!?])\s+", body)
-    excerpt = " ".join(sentences[:3]) if sentences else body[:400]
-    excerpt = excerpt[:500].strip()
 
-    if header and title:
-        text = f"{header}: {title}. {excerpt}"
-    elif title:
-        text = f"{title}. {excerpt}"
-    else:
-        text = excerpt or "Текст закона извлечён; сводка требует ручной проверки."
-
-    return SummaryResult(text=text, title=_fallback_title(name), model_route=ModelRoute.qwen)
+def _changes_context(changes: list[dict] | None) -> str:
+    if not changes:
+        return ""
+    lines: list[str] = []
+    for change in changes[:8]:
+        target = change.get("target_act") or {}
+        label = target.get("number") or target.get("name") or "акт"
+        article = (change.get("unit_address") or {}).get("статья")
+        article_part = f", ст. {article}" if article else ""
+        after = re.sub(r"\s+", " ", (change.get("text_after") or "")).strip()[:400]
+        lines.append(f"- {label}{article_part}: {after}" if after else f"- {label}{article_part}")
+    return "Изменения (для понимания сути, не цитировать дословно):\n" + "\n".join(lines)
 
 
 def generate_summary(
@@ -77,42 +107,49 @@ def generate_summary(
     document_date: str | None,
     name: str | None,
     fragment: str,
+    changes: list[dict] | None = None,
 ) -> SummaryResult:
+    from explainlaw.gates.text_checks import first_n_sentences
+
     context = (
         f"Номер: {number or 'не указан'}\n"
         f"Дата подписания: {document_date or 'не указана'}\n"
         f"Название: {_clean_title(name)}\n\n"
+        f"{_changes_context(changes)}\n\n"
         f"Фрагмент текста закона:\n{fragment}"
     )
 
     from explainlaw.llm.factory import create_gateway_client, create_qwen_client
 
+    def _from_payload(data: dict, route: ModelRoute) -> SummaryResult | None:
+        summary_text = first_n_sentences(str(data.get("summary") or "").strip(), 2)
+        if not summary_text:
+            return None
+        if summary_text.upper().startswith("НЕДОСТАТОЧНО ДАННЫХ"):
+            return SummaryResult(text="НЕДОСТАТОЧНО ДАННЫХ", title="", model_route=route)
+        return SummaryResult(
+            text=summary_text,
+            title=sanitize_gist_title(str(data.get("title") or "")),
+            model_route=route,
+        )
+
     client = create_gateway_client()
     if client.available:
         try:
             data = client.chat_json(system=_GATEWAY_SYSTEM, user=context)
-            summary_text = str(data.get("summary") or "").strip()
-            if summary_text:
-                return SummaryResult(
-                    text=summary_text,
-                    title=str(data.get("title") or "").strip(),
-                    model_route=ModelRoute.gateway,
-                )
+            parsed = _from_payload(data, ModelRoute.gateway)
+            if parsed is not None:
+                return parsed
         except Exception:
             logger.exception("Gateway недоступен, пробуем Qwen на grounded контексте")
 
-    # Qwen допустим как обработчик предъявленного текста (§8.1 / перспектива)
     qwen = create_qwen_client()
     if qwen.available:
         try:
             data = qwen.chat_json(system=_GATEWAY_SYSTEM, user=context)
-            summary_text = str(data.get("summary") or "").strip()
-            if summary_text:
-                return SummaryResult(
-                    text=summary_text,
-                    title=str(data.get("title") or "").strip(),
-                    model_route=ModelRoute.qwen,
-                )
+            parsed = _from_payload(data, ModelRoute.qwen)
+            if parsed is not None:
+                return parsed
         except Exception:
             logger.exception("Qwen недоступен, используем механический fallback")
 

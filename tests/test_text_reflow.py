@@ -3,6 +3,7 @@ from datetime import date
 from explainlaw.content.digest import _current_week_bounds, _past_week_bounds
 from explainlaw.gates.text_checks import (
     clean_quote_snippet,
+    first_n_sentences,
     fix_ocr_artifacts,
     reflow_soft_linebreaks,
     truncate_at_sentence,
@@ -152,3 +153,25 @@ def test_telegram_format_reflows_and_keeps_html():
     assert "Сторонами концессионного соглашения" in text
     assert "\nконцессионного\n" not in text
     assert 'href="http://publication.pravo.gov.ru/document/0001"' in text
+
+
+def test_reflow_keeps_card_template_lines():
+    raw = (
+        "Принят: 01.01.2026\n"
+        "Опубликован: 02.01.2026\n"
+        "Вступает в силу: см. первоисточник\n"
+        "\n"
+        "Краткая суть закона.\n"
+        "\n"
+        "Меняет: КоАП РФ, ст. 1\n"
+        "Источник: http://example.com"
+    )
+    text = reflow_soft_linebreaks(raw)
+    assert "Принят: 01.01.2026\nОпубликован: 02.01.2026\nВступает в силу: см. первоисточник" in text
+    assert "Меняет: КоАП РФ, ст. 1" in text
+
+
+def test_first_n_sentences_keeps_complete_thoughts():
+    text = "Первое предложение. Второе предложение. Третье."
+    assert first_n_sentences(text, 2) == "Первое предложение. Второе предложение."
+    assert first_n_sentences("одна мысль без точки", 2) == "одна мысль без точки"

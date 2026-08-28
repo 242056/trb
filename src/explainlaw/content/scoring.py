@@ -1,20 +1,20 @@
-"""Оценка значимости карточек для еженедельного отбора (§7.2)."""
+"""Оценка значимости документов для ежедневного отбора (§7.2)."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
 
-from explainlaw.db.models import DeltaCompleteness, NpaDelta, NpaDocument, PostBank
+from explainlaw.db.models import DeltaCompleteness, NpaDelta, NpaDocument
 
 
 @dataclass
 class ScoredCard:
-    post_id: int
     document_id: int
     document: NpaDocument
     delta: NpaDelta | None
-    card: PostBank
+    title: str
+    content: str
     score: float
 
 
@@ -22,8 +22,8 @@ def score_card(
     *,
     doc: NpaDocument,
     delta: NpaDelta | None,
-    card: PostBank,
     today: date | None = None,
+    content_len: int = 0,
 ) -> float:
     """Чем выше — тем приоритетнее для дайджеста."""
     today = today or date.today()
@@ -52,7 +52,6 @@ def score_card(
     if doc.significance_score is not None:
         score += doc.significance_score
 
-    # Короткие карточки — ниже приоритет
-    score += min(len(card.content) / 500.0, 5.0)
+    score += min(content_len / 500.0, 5.0)
 
     return score

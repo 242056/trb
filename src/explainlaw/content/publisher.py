@@ -14,12 +14,11 @@ from sqlalchemy.orm import Session
 
 from explainlaw.config import settings
 from explainlaw.content.digest import (
-    build_enactment_week_post,
     build_quiet_day_post,
     create_digest_post,
 )
 from explainlaw.content.selector import select_cards_for_digest
-from explainlaw.db.models import PostBank, PostStatus, PostType
+from explainlaw.db.models import PUBLICATION_POST_TYPES, PostBank, PostStatus, PostType
 from explainlaw.pipeline.topics import TOPIC_POST_READY
 
 logger = logging.getLogger(__name__)
@@ -112,17 +111,6 @@ class WeeklyPublisher:
                 self._publish_kafka(post.id, post.post_type.value)
 
         stats.reserve_ready_count = self._count_ready_posts()
-        # Резерв «вступает в силу» — только если мало ready-карточек и это не тихий день.
-        if (
-            stats.digest_type != "quiet_day"
-            and stats.reserve_ready_count < settings.post_reserve_count
-        ):
-            fallback = build_enactment_week_post(self._session, today=today)
-            if fallback:
-                stats.fallback_created = True
-                stats.fallback_post_id = fallback.id
-                self._publish_kafka(fallback.id, fallback.post_type.value)
-                stats.reserve_ready_count = self._count_ready_posts()
 
         if mark_published:
             # Публикуем именно созданный дайджест/тихий день, а не случайный старый ready.
@@ -146,7 +134,10 @@ class WeeklyPublisher:
         return self._session.execute(
             select(func.count())
             .select_from(PostBank)
-            .where(PostBank.status == PostStatus.ready)
+            .where(
+                PostBank.status == PostStatus.ready,
+                PostBank.post_type.in_(PUBLICATION_POST_TYPES),
+            )
         ).scalar_one()
 
     def _ready_digest_today(self, today: date) -> PostBank | None:
@@ -167,7 +158,10 @@ class WeeklyPublisher:
     def _oldest_ready_post(self) -> PostBank | None:
         return self._session.execute(
             select(PostBank)
-            .where(PostBank.status == PostStatus.ready)
+            .where(
+                PostBank.status == PostStatus.ready,
+                PostBank.post_type.in_(PUBLICATION_POST_TYPES),
+            )
             .order_by(PostBank.created_at.asc())
             .limit(1)
         ).scalar_one_or_none()

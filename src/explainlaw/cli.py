@@ -19,6 +19,7 @@ from explainlaw.db.models import (
     NpaSummary,
     NpaText,
     PipelineJobType,
+    PUBLICATION_POST_TYPES,
     PostBank,
     PostStatus,
 )
@@ -324,12 +325,18 @@ def cmd_status(args: argparse.Namespace) -> int:
         with_delta = session.execute(select(func.count()).select_from(NpaDelta)).scalar_one()
         missing_acts = session.execute(select(func.count()).select_from(MissingActsQueue)).scalar_one()
         gate_flags = session.execute(select(func.count()).select_from(GateFlag)).scalar_one()
-        post_bank = session.execute(select(func.count()).select_from(PostBank)).scalar_one()
+        post_bank = session.execute(
+            select(func.count()).select_from(PostBank).where(PostBank.post_type.in_(PUBLICATION_POST_TYPES))
+        ).scalar_one()
         post_ready = session.execute(
-            select(func.count()).select_from(PostBank).where(PostBank.status == PostStatus.ready)
+            select(func.count())
+            .select_from(PostBank)
+            .where(PostBank.status == PostStatus.ready, PostBank.post_type.in_(PUBLICATION_POST_TYPES))
         ).scalar_one()
         post_published = session.execute(
-            select(func.count()).select_from(PostBank).where(PostBank.status == PostStatus.published)
+            select(func.count())
+            .select_from(PostBank)
+            .where(PostBank.status == PostStatus.published, PostBank.post_type.in_(PUBLICATION_POST_TYPES))
         ).scalar_one()
         gate_passed = session.execute(
             select(func.count()).select_from(NpaSummary).where(NpaSummary.gate_status == GateStatus.passed)
@@ -358,7 +365,10 @@ def cmd_status(args: argparse.Namespace) -> int:
     print(json.dumps(
         {
             "catalog_api_total": in_api,
-            "catalog_note": "Официальный API publication.pravo.gov.ru, ФЗ с ~2011 года (граница источника)",
+            "catalog_note": (
+                "Официальный API publication.pravo.gov.ru, базовый тип (ФЗ) с ~2011 года "
+                "(граница источника)"
+            ),
             "in_database": in_db,
             "with_text": with_text,
             "with_summary": with_summary,
@@ -392,7 +402,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(prog="explainlaw", description="ExplainLaw — Шаг 1")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p_collect = sub.add_parser("collect", help="Ежедневный сбор ФЗ с publication.pravo.gov.ru")
+    p_collect = sub.add_parser(
+        "collect", help="Ежедневный сбор документов с publication.pravo.gov.ru (ФЗ, указы, постановления)"
+    )
     p_collect.add_argument("--date", help="Один день: YYYY-MM-DD")
     p_collect.add_argument("--from", dest="date_from", help="Начало диапазона YYYY-MM-DD")
     p_collect.add_argument("--to", dest="date_to", help="Конец диапазона YYYY-MM-DD")
@@ -405,7 +417,7 @@ def main() -> None:
         "--all",
         dest="all_catalog",
         action="store_true",
-        help="Весь каталог ФЗ из API (~7700 с 2011 г.). Дедуп по eoNumber, можно запускать повторно",
+        help="Весь каталог из API (ФЗ, указы, постановления). Дедуп по eoNumber, можно запускать повторно",
     )
     p_collect.add_argument(
         "--period",
@@ -415,7 +427,7 @@ def main() -> None:
     )
     p_collect.set_defaults(func=cmd_collect)
 
-    p_list = sub.add_parser("list", help="Список собранных ФЗ")
+    p_list = sub.add_parser("list", help="Список собранных документов")
     p_list.add_argument("--limit", type=int, default=20)
     p_list.set_defaults(func=cmd_list)
 
@@ -434,7 +446,7 @@ def main() -> None:
     )
     p_process.set_defaults(func=cmd_process)
 
-    p_gate = sub.add_parser("gate", help="Гейты качества (дельта + сводка) → post_bank")
+    p_gate = sub.add_parser("gate", help="Гейты качества (дельта + сводка)")
     p_gate.add_argument("--limit", type=int, help="Проверить не более N документов")
     p_gate.add_argument("--force", action="store_true", help="Перепроверить уже проверенные")
     p_gate.add_argument(
@@ -444,7 +456,7 @@ def main() -> None:
     )
     p_gate.set_defaults(func=cmd_gate)
 
-    p_publish = sub.add_parser("publish", help="Собрать ежедневную сводку из post_bank (§7.2)")
+    p_publish = sub.add_parser("publish", help="Собрать и опубликовать ежедневную сводку (§7.2)")
     p_publish.add_argument("--min-items", type=int, help="Минимум карточек для полного дайджеста")
     p_publish.add_argument("--max-items", type=int, help="Максимум карточек в дайджесте")
     p_publish.add_argument("--dry-run", action="store_true", help="Только показать отбор, без записи")

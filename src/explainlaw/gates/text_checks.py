@@ -50,10 +50,15 @@ def normalize_whitespace(text: str) -> str:
 # Однострочные маркеры дайджеста (не тянут продолжение со следующих строк)
 _STANDALONE_LINE_RE = re.compile(
     r"^(?:"
+    r"---+|"
     r"\d+\.\s|"
     r"Источник:|"
     r"Изменения:|"
+    r"Принят:|"
+    r"Опубликован:|"
+    r"Меняет:|"
     r"Еженедельный|"
+    r"Свежие федеральные законы|"
     r"Вступает в силу|"
     r"🔗|"
     r"<"
@@ -185,6 +190,28 @@ def truncate_at_sentence(text: str, max_len: int, *, ellipsis: str = "…") -> s
     if last_end is not None and last_end >= budget_start:
         return cut[:last_end].rstrip()
     return truncate_at_word(text, max_len, ellipsis=ellipsis)
+
+
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?…])\s+")
+
+
+def first_n_sentences(text: str, n: int = 2) -> str:
+    """Целые предложения без обрезки mid-word. Если точек нет — весь текст как одна мысль."""
+    text = (text or "").strip()
+    if not text or n <= 0:
+        return ""
+    parts = [p.strip() for p in _SENTENCE_SPLIT_RE.split(text) if p.strip()]
+    if not parts:
+        return text
+    return " ".join(parts[:n])
+
+
+def count_sentences(text: str) -> int:
+    text = (text or "").strip()
+    if not text:
+        return 0
+    parts = [p.strip() for p in _SENTENCE_SPLIT_RE.split(text) if p.strip()]
+    return max(1, len(parts))
 
 
 def reflow_soft_linebreaks(text: str) -> str:

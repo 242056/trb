@@ -79,10 +79,8 @@ def _item_matches(identifier: dict, item: PravoDocumentItem) -> bool:
 def find_act_in_catalog(
     client: PravoApiClient,
     identifier: dict,
-    *,
-    fz_type_id,
 ) -> PravoDocumentItem | None:
-    """Ищет акт в каталоге API по номеру и дате."""
+    """Ищет акт в каталоге API по номеру и дате — по всем типам сбора (ФЗ, указы, постановления)."""
     date_from = None
     date_to = None
     if identifier.get("date"):
@@ -90,18 +88,21 @@ def find_act_in_catalog(
         date_from = act_date - timedelta(days=30)
         date_to = act_date + timedelta(days=365)
 
-    for item in client.iter_all_federal_laws(
-        fz_type_id=fz_type_id,
-        publish_date_from=date_from,
-        publish_date_to=date_to,
-    ):
-        if _item_matches(identifier, item):
-            return item
-
-    if date_from:
-        for item in client.iter_all_federal_laws(fz_type_id=fz_type_id):
+    targets = client.collect_targets()
+    for target in targets:
+        for item in client.iter_all_documents(
+            target,
+            publish_date_from=date_from,
+            publish_date_to=date_to,
+        ):
             if _item_matches(identifier, item):
                 return item
+
+    if date_from:
+        for target in targets:
+            for item in client.iter_all_documents(target):
+                if _item_matches(identifier, item):
+                    return item
 
     return None
 
@@ -126,7 +127,6 @@ class MissingActsFetcher:
     def fetch(self, *, limit: int = 10) -> FetchMissingStats:
         stats = FetchMissingStats()
         sync_reference_data(self._session, self._pravo)
-        fz_type_id = self._pravo.resolve_fz_type_id()
 
         pending = self._session.execute(
             select(MissingActsQueue)
@@ -144,7 +144,7 @@ class MissingActsFetcher:
                 continue
 
             try:
-                item = find_act_in_catalog(self._pravo, identifier, fz_type_id=fz_type_id)
+                item = find_act_in_catalog(self._pravo, identifier)
             except Exception as exc:
                 stats.errors += 1
                 stats.error_details.append(f"{identifier}: {exc}")

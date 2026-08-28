@@ -31,6 +31,12 @@ def format_ru_day(day: date) -> str:
     return f"{day.day} {_MONTHS_GENITIVE[day.month - 1]} {day.year}"
 
 
+def digest_freshness_start(today: date) -> date:
+    """Начало актуального периода для отбора: понедельник прошедшей календарной недели."""
+    start, _ = _past_week_bounds(today)
+    return start
+
+
 def digest_title_for_day(day: date) -> str:
     return f"Обзор ФЗ · {format_ru_day(day)}"
 
@@ -61,9 +67,12 @@ def build_digest_content(
     label = period_label or week_label or ""
     lines = [f"Свежие федеральные законы ({label})", ""]
     for idx, card in enumerate(cards, start=1):
+        if idx > 1:
+            lines.append("---")
+            lines.append("")
         doc = card.document
-        body = reflow_soft_linebreaks(card.card.content.strip())
-        lines.append(f"{idx}. {card.card.title}")
+        body = reflow_soft_linebreaks(card.content.strip())
+        lines.append(f"{idx}. {card.title}")
         lines.append(body)
         if doc.source_url and doc.source_url not in body:
             lines.append(f"Источник: {doc.source_url}")
