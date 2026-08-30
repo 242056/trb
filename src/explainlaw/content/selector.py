@@ -4,9 +4,12 @@ from __future__ import annotations
 
 from datetime import date
 
-from sqlalchemy import func, select
+from uuid import UUID
+
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
+from explainlaw.config import settings
 from explainlaw.content.digest import digest_freshness_start
 from explainlaw.content.scoring import ScoredCard, score_card
 from explainlaw.db.models import (
@@ -40,6 +43,7 @@ def select_cards_for_digest(
     today = today or date.today()
     freshness_start = digest_freshness_start(today)
     used_docs = _documents_in_digests(session)
+    fz_type_id = UUID(settings.pravo_document_type_fz_id)
     latest_summary_id = (
         select(func.max(NpaSummary.id))
         .where(NpaSummary.document_id == NpaDocument.id)
@@ -55,6 +59,10 @@ def select_cards_for_digest(
             NpaSummary.id == latest_summary_id,
             NpaSummary.gate_status == GateStatus.passed,
             NpaDocument.publish_date_short >= freshness_start,
+            or_(
+                NpaDocument.document_type_id == fz_type_id,
+                NpaDocument.number.ilike("%-ФЗ"),
+            ),
         )
         .order_by(NpaDocument.publish_date_short.desc())
     ).all()
