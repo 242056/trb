@@ -215,14 +215,16 @@ class PravoApiClient:
         """Полный каталог документов одного типа в блоке — данные с ~2011 года.
 
         Официальный API не отдаёт ФЗ до ~2011; это граница источника, не баг сборщика.
+        API в режиме полного каталога часто игнорирует DocumentTypeId — фильтруем на клиенте.
         """
         type_id = self.resolve_target_type_id(target)
         page = 1
+        matched_total = 0
 
         while True:
             result = self.list_documents_page(
                 block=target.block,
-                document_type_id=None,
+                document_type_id=type_id,
                 period_type=None,
                 publish_date_from=publish_date_from,
                 publish_date_to=publish_date_to,
@@ -232,6 +234,7 @@ class PravoApiClient:
             if not result.items:
                 break
 
+            matched_on_page = 0
             for item in result.items:
                 if item.document_type_id != type_id:
                     continue
@@ -240,7 +243,19 @@ class PravoApiClient:
                     continue
                 if publish_date_to and pub_date and pub_date > publish_date_to:
                     continue
+                matched_on_page += 1
+                matched_total += 1
                 yield item
+
+            if page == 1 or page % 10 == 0 or page >= result.pages_total_count:
+                logger.info(
+                    "Каталог %s: страница %s/%s, совпадений на странице %s, всего %s",
+                    target.key(),
+                    page,
+                    result.pages_total_count,
+                    matched_on_page,
+                    matched_total,
+                )
 
             if page >= result.pages_total_count:
                 break

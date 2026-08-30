@@ -133,6 +133,7 @@ class DailyCollector:
                 target.key(),
             )
             seen: set[str] = set()
+            target_start_fetched = stats.fetched
             for item in self._pravo.iter_all_documents(
                 target,
                 publish_date_from=date_from,
@@ -142,6 +143,14 @@ class DailyCollector:
                     continue
                 seen.add(item.eo_number)
                 self._ingest_or_skip(item, stats, type_key=target.key())
+            logger.info(
+                "Каталог %s завершён: fetched=%s new=%s skipped=%s errors=%s",
+                target.key(),
+                stats.fetched - target_start_fetched,
+                stats.by_type.get(target.key(), {}).get("new", 0),
+                stats.by_type.get(target.key(), {}).get("skipped", 0),
+                stats.by_type.get(target.key(), {}).get("errors", 0),
+            )
 
         self._session.commit()
         return stats
@@ -220,6 +229,7 @@ class DailyCollector:
             if not has_pdf:
                 stats.no_pdf += 1
             self._session.commit()
+            self._session.expunge_all()
             if has_pdf:
                 logger.info("Сохранён новый документ: %s — %s", item.eo_number, item.name)
             else:
