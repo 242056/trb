@@ -42,3 +42,5 @@ docker compose --profile local up -d --build
 | [YANDEX_PROD.md](YANDEX_PROD.md) | Прод-runbook (деплой / cron / .env) |
 | [PROD_HANDOFF.md](PROD_HANDOFF.md) | Исторический handoff |
 | [rule.md](rule.md) | ТЗ |
+
+<!-- test sync marker: 2026-08-31T08:21:39Z -->
