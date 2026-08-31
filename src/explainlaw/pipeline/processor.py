@@ -26,7 +26,6 @@ from explainlaw.extraction.act_identifier import find_document_by_identifier
 from explainlaw.extraction.changes import (
     effective_date_for_article,
     extract_scoped_norm_changes,
-    is_amendment_law,
 )
 from explainlaw.extraction.enactment import extract_enactments
 from explainlaw.extraction.fragment import extract_summary_fragment

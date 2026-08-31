@@ -5,7 +5,7 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from explainlaw.db.models import MissingActStatus, MissingActsQueue, NpaDocument
+from explainlaw.db.models import MissingActStatus, MissingActsQueue
 from explainlaw.extraction.act_identifier import find_document_by_identifier, identifier_key
 
 

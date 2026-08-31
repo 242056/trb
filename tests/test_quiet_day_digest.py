@@ -21,14 +21,6 @@ def test_digest_freshness_start_is_previous_monday():
     assert digest_freshness_start(date(2026, 8, 14)) == date(2026, 8, 3)
 
 
-def test_format_ru_day():
-    assert format_ru_day(date(2026, 8, 7)) == "7 августа 2026"
-
-
-def test_digest_title_for_day():
-    assert digest_title_for_day(date(2026, 8, 7)) == "Обзор ФЗ · 7 августа 2026"
-
-
 def test_quiet_day_content_is_readable():
     text = build_quiet_day_content(day=date(2026, 8, 7))
     assert "7 августа 2026" in text

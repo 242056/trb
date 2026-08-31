@@ -1,4 +1,3 @@
-import os
 
 from explainlaw.config import Settings
 

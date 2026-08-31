@@ -244,6 +244,9 @@ def test_summary_gate_flags_too_long():
     result = run_summary_gate(doc, summary, delta)
     assert not result.passed
     assert any(f.flag_type == "summary_too_long" for f in result.flags)
+
+
+def test_summary_gate_flags_insufficient_data():
     doc = _doc()
     summary = NpaSummary(
         document_id=1,
@@ -258,20 +261,3 @@ def test_summary_gate_flags_too_long():
     result = run_summary_gate(doc, summary, delta)
     assert not result.passed
     assert result.flags[0].flag_type == "insufficient_data"
-
-
-def test_summary_gate_flags_too_long():
-    doc = _doc()
-    summary = NpaSummary(
-        document_id=1,
-        summary_text="Первое. Второе. Третье.",
-        model_route=ModelRoute.gateway,
-    )
-    delta = NpaDelta(
-        document_id=1,
-        completeness_status=DeltaCompleteness.partial,
-        delta_data={"changes": [{"target_act": {"number": "10-ФЗ"}, "text_after": "патч"}]},
-    )
-    result = run_summary_gate(doc, summary, delta)
-    assert not result.passed
-    assert any(f.flag_type == "summary_too_long" for f in result.flags)

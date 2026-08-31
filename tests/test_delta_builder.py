@@ -1,4 +1,3 @@
-from datetime import date
 from types import SimpleNamespace
 
 from explainlaw.delta.builder import _cap_delta_quote, _is_amendment_event

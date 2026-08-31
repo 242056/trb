@@ -8,7 +8,6 @@ from sqlalchemy import desc, func, select
 from explainlaw.config import settings
 from explainlaw.db.models import (
     PUBLICATION_POST_TYPES,
-    GateStatus,
     NpaDelta,
     NpaDocument,
     NpaSummary,
