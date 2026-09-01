@@ -13,28 +13,28 @@ help: ## Список целей
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 
 build: ## Пересобрать app+cron и перезапустить
-	docker compose build app cron
-	docker compose up -d app cron
+	sudo docker compose build app cron
+	sudo docker compose up -d app cron
 
 up: ## Поднять app+cron
-	docker compose up -d
+	sudo docker compose up -d
 
 down: ## Остановить
-	docker compose down
+	sudo docker compose down
 
 collect-all: ## Полный сбор каталога (--all) в фоне, лог в файл
-	docker exec -d $(COLLECT_CONTAINER) sh -c 'explainlaw collect --all > $(COLLECT_LOG) 2>&1'
+	sudo docker exec -d $(COLLECT_CONTAINER) sh -c 'explainlaw collect --all > $(COLLECT_LOG) 2>&1'
 	@echo "collect --all стартовал в фоне ($(COLLECT_CONTAINER))"
 	@echo "журнал: make collect-logs | статус: make collect-status"
 
 collect-logs: ## Следить за журналом collect (Ctrl+C — выйти)
-	docker exec -t $(COLLECT_CONTAINER) tail -f $(COLLECT_LOG)
+	sudo docker exec -t $(COLLECT_CONTAINER) tail -f $(COLLECT_LOG)
 
 collect-status: ## Процесс collect жив?
-	docker exec -t $(COLLECT_CONTAINER) sh -c 'ps aux | grep "[c]ollect" || echo "collect NOT running"'
+	sudo docker exec -t $(COLLECT_CONTAINER) sh -c 'ps aux | grep "[c]ollect" || echo "collect NOT running"'
 
 # ============================================================================
-# Тесты (локально, ./.venv). Полный набор: 111 passed, 1 skipped.
+# Тесты (локально, ./.venv). Полный набор: 112 passed, 1 skipped.
 # ============================================================================
 
 VENV        ?= ./.venv
