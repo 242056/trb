@@ -5,8 +5,14 @@
 
 COLLECT_CONTAINER ?= regulatory-legal-acts-cron
 COLLECT_LOG       ?= /app/logs/collect-all.log
+PROCESS_LOG       ?= /app/logs/process.log
+GATE_LOG          ?= /app/logs/gate.log
+PROCESS_LIMIT     ?= 500
 
 .PHONY: help build up down collect-all collect-logs collect-status \
+        process process-bg process-logs process-status \
+        gate gate-bg gate-logs gate-status \
+        pipeline-bg status \
         test test-collect lint test-verbose
 
 help: ## Список целей
@@ -32,6 +38,42 @@ collect-logs: ## Следить за журналом collect (Ctrl+C — вый
 
 collect-status: ## Процесс collect жив?
 	sudo docker exec -t $(COLLECT_CONTAINER) sh -c 'ps aux | grep "[c]ollect" || echo "collect NOT running"'
+
+process: ## Обработка PDF→текст→сводка (foreground, LIMIT=$(PROCESS_LIMIT))
+	sudo docker exec -it $(COLLECT_CONTAINER) explainlaw process --limit $(PROCESS_LIMIT)
+
+process-bg: ## process в фоне, лог в $(PROCESS_LOG)
+	sudo docker exec -d $(COLLECT_CONTAINER) sh -c 'explainlaw process --limit $(PROCESS_LIMIT) > $(PROCESS_LOG) 2>&1'
+	@echo "process стартовал в фоне ($(COLLECT_CONTAINER)), limit=$(PROCESS_LIMIT)"
+	@echo "журнал: make process-logs | статус: make process-status"
+
+process-logs: ## Следить за журналом process (Ctrl+C — выйти)
+	sudo docker exec -t $(COLLECT_CONTAINER) sh -c 'touch $(PROCESS_LOG) && tail -f $(PROCESS_LOG)'
+
+process-status: ## Процесс process жив?
+	sudo docker exec -t $(COLLECT_CONTAINER) sh -c 'ps aux | grep "[e]xplainlaw process" || echo "process NOT running"'
+
+gate: ## Гейты качества (foreground, LIMIT=$(PROCESS_LIMIT))
+	sudo docker exec -it $(COLLECT_CONTAINER) explainlaw gate --limit $(PROCESS_LIMIT)
+
+gate-bg: ## gate в фоне, лог в $(GATE_LOG)
+	sudo docker exec -d $(COLLECT_CONTAINER) sh -c 'explainlaw gate --limit $(PROCESS_LIMIT) > $(GATE_LOG) 2>&1'
+	@echo "gate стартовал в фоне ($(COLLECT_CONTAINER)), limit=$(PROCESS_LIMIT)"
+	@echo "журнал: make gate-logs | статус: make gate-status"
+
+gate-logs: ## Следить за журналом gate (Ctrl+C — выйти)
+	sudo docker exec -t $(COLLECT_CONTAINER) sh -c 'touch $(GATE_LOG) && tail -f $(GATE_LOG)'
+
+gate-status: ## Процесс gate жив?
+	sudo docker exec -t $(COLLECT_CONTAINER) sh -c 'ps aux | grep "[e]xplainlaw gate" || echo "gate NOT running"'
+
+pipeline-bg: ## process → gate в фоне (один sh, limit=$(PROCESS_LIMIT))
+	sudo docker exec -d $(COLLECT_CONTAINER) sh -c 'explainlaw process --limit $(PROCESS_LIMIT) > $(PROCESS_LOG) 2>&1 && explainlaw gate --limit $(PROCESS_LIMIT) > $(GATE_LOG) 2>&1'
+	@echo "pipeline process→gate стартовал в фоне, limit=$(PROCESS_LIMIT)"
+	@echo "process: make process-logs | gate: make gate-logs"
+
+status: ## Backlog: сколько документов без текста / в очереди
+	sudo docker exec -it $(COLLECT_CONTAINER) explainlaw status
 
 # ============================================================================
 # Тесты (локально, ./.venv). Полный набор: 112 passed, 1 skipped.
