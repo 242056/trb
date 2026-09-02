@@ -10,7 +10,22 @@ COLLECT_CONTAINER ?= regulatory-legal-acts-cron
 COLLECT_LOG       ?= /app/logs/collect-all.log
 PROCESS_LOG       ?= /app/logs/process.log
 GATE_LOG          ?= /app/logs/gate.log
+# 500 по умолчанию; 0 / all / unlimited / пусто — без --limit (весь backlog)
 PROCESS_LIMIT     ?= 500
+
+# Собираем флаг для explainlaw process/gate
+ifeq ($(strip $(PROCESS_LIMIT)),)
+LIMIT_FLAG :=
+else ifeq ($(PROCESS_LIMIT),0)
+LIMIT_FLAG :=
+else ifeq ($(PROCESS_LIMIT),all)
+LIMIT_FLAG :=
+else ifeq ($(PROCESS_LIMIT),unlimited)
+LIMIT_FLAG :=
+else
+LIMIT_FLAG := --limit $(PROCESS_LIMIT)
+endif
+LIMIT_LABEL := $(if $(LIMIT_FLAG),$(PROCESS_LIMIT),unlimited)
 
 .PHONY: help build up down collect-all collect-logs collect-status \
         process process-bg process-logs process-status \
@@ -43,14 +58,14 @@ collect-status: ## Процесс collect жив? (через docker top — в 
 	@$(DOCKER) top $(COLLECT_CONTAINER) 2>/dev/null | grep -E '[c]ollect|[e]xplainlaw collect' \
 		|| echo "collect NOT running"
 
-process: ## Обработка PDF→текст→сводка (foreground, LIMIT=$(PROCESS_LIMIT))
+process: ## Обработка PDF→текст→сводка (foreground; LIMIT=$(LIMIT_LABEL))
 	$(DOCKER) exec -it -e PYTHONUNBUFFERED=1 $(COLLECT_CONTAINER) \
-		explainlaw process --limit $(PROCESS_LIMIT)
+		explainlaw process $(LIMIT_FLAG)
 
 process-bg: ## process в фоне, лог в $(PROCESS_LOG)
 	$(DOCKER) exec -d -e PYTHONUNBUFFERED=1 $(COLLECT_CONTAINER) sh -c \
-		'explainlaw process --limit $(PROCESS_LIMIT) > $(PROCESS_LOG) 2>&1'
-	@echo "process стартовал в фоне ($(COLLECT_CONTAINER)), limit=$(PROCESS_LIMIT)"
+		'explainlaw process $(LIMIT_FLAG) > $(PROCESS_LOG) 2>&1'
+	@echo "process стартовал в фоне ($(COLLECT_CONTAINER)), limit=$(LIMIT_LABEL)"
 	@echo "журнал: make process-logs | статус: make process-status"
 
 process-logs: ## Следить за журналом process (Ctrl+C — выйти)
@@ -60,14 +75,14 @@ process-status: ## Процесс process жив? (через docker top — в 
 	@$(DOCKER) top $(COLLECT_CONTAINER) 2>/dev/null | grep -E '[e]xplainlaw process' \
 		|| echo "process NOT running"
 
-gate: ## Гейты качества (foreground, LIMIT=$(PROCESS_LIMIT))
+gate: ## Гейты качества (foreground; LIMIT=$(LIMIT_LABEL))
 	$(DOCKER) exec -it -e PYTHONUNBUFFERED=1 $(COLLECT_CONTAINER) \
-		explainlaw gate --limit $(PROCESS_LIMIT)
+		explainlaw gate $(LIMIT_FLAG)
 
 gate-bg: ## gate в фоне, лог в $(GATE_LOG)
 	$(DOCKER) exec -d -e PYTHONUNBUFFERED=1 $(COLLECT_CONTAINER) sh -c \
-		'explainlaw gate --limit $(PROCESS_LIMIT) > $(GATE_LOG) 2>&1'
-	@echo "gate стартовал в фоне ($(COLLECT_CONTAINER)), limit=$(PROCESS_LIMIT)"
+		'explainlaw gate $(LIMIT_FLAG) > $(GATE_LOG) 2>&1'
+	@echo "gate стартовал в фоне ($(COLLECT_CONTAINER)), limit=$(LIMIT_LABEL)"
 	@echo "журнал: make gate-logs | статус: make gate-status"
 
 gate-logs: ## Следить за журналом gate (Ctrl+C — выйти)
@@ -77,10 +92,10 @@ gate-status: ## Процесс gate жив? (через docker top — в обр
 	@$(DOCKER) top $(COLLECT_CONTAINER) 2>/dev/null | grep -E '[e]xplainlaw gate' \
 		|| echo "gate NOT running"
 
-pipeline-bg: ## process → gate в фоне (один sh, limit=$(PROCESS_LIMIT))
+pipeline-bg: ## process → gate в фоне (один sh; LIMIT=$(LIMIT_LABEL))
 	$(DOCKER) exec -d -e PYTHONUNBUFFERED=1 $(COLLECT_CONTAINER) sh -c \
-		'explainlaw process --limit $(PROCESS_LIMIT) > $(PROCESS_LOG) 2>&1 && explainlaw gate --limit $(PROCESS_LIMIT) > $(GATE_LOG) 2>&1'
-	@echo "pipeline process→gate стартовал в фоне, limit=$(PROCESS_LIMIT)"
+		'explainlaw process $(LIMIT_FLAG) > $(PROCESS_LOG) 2>&1 && explainlaw gate $(LIMIT_FLAG) > $(GATE_LOG) 2>&1'
+	@echo "pipeline process→gate стартовал в фоне, limit=$(LIMIT_LABEL)"
 	@echo "process: make process-logs | gate: make gate-logs"
 
 status: ## Backlog: сколько документов без текста / в очереди

@@ -45,7 +45,13 @@ make status        # backlog: pending_process, gate и т.д.
 ```bash
 make process-bg PROCESS_LIMIT=50
 make pipeline-bg PROCESS_LIMIT=1000
+# весь backlog (~десятки тысяч, часы/сутки):
+make process-bg PROCESS_LIMIT=0
+# то же:
+make process-bg PROCESS_LIMIT=all
 ```
+
+`0` / `all` / `unlimited` / пустая строка — **без** `--limit` (обрабатывает всё необработанное).
 
 **Другой контейнер / путь к логу:**
 
