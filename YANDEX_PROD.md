@@ -5,6 +5,8 @@
 
 На хосте только Docker (`app` + `cron`). PG / Kafka / Object Storage — в Yandex Cloud.
 
+**Ручные операции** (collect / process / gate, make-цели, логи): **`PROD_OPS.md`**.
+
 ---
 
 ## 1. Один раз: поднять сервис
