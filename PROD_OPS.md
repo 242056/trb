@@ -167,11 +167,17 @@ sudo docker compose logs -f cron
 
 ### Процесс жив?
 
+В образе cron **нет `ps`** — `make *-status` смотрит через `sudo docker top` с хоста:
+
 ```bash
 make process-status
 make gate-status
 make collect-status
+# или вручную:
+sudo docker top regulatory-legal-acts-cron
 ```
+
+Если в логе только warning `fitz` — process ещё выбирает кандидатов в БД (может занять 1–5 мин). После деплоя с ранним логом сразу появится `process: ищу кандидатов…`.
 
 ### БД: последние collect/process
 

@@ -114,10 +114,15 @@ class DocumentProcessor:
 
     def process(self, *, limit: int | None = None) -> ProcessStats:
         stats = ProcessStats()
+        logger.info(
+            "process: ищу кандидатов%s…",
+            f" (limit={limit})" if limit is not None else "",
+        )
         docs = self._pending_documents(limit)
         stats.candidates = len(docs)
+        logger.info("process: кандидатов %s", stats.candidates)
 
-        for doc in docs:
+        for i, doc in enumerate(docs, start=1):
             try:
                 if doc.text and doc.summaries and doc.delta and not self._force:
                     gate_pending = doc.summaries[0].gate_status == GateStatus.pending
@@ -144,11 +149,16 @@ class DocumentProcessor:
                 if result.get("gate_flagged"):
                     stats.gates_flagged += 1
                 if result.get("text_extracted"):
-                    logger.info("Извлечён текст %s", doc.eo_number)
+                    logger.info("[%s/%s] Извлечён текст %s", i, stats.candidates, doc.eo_number)
                 elif result.get("summarized"):
-                    logger.info("Сводка %s", doc.eo_number)
+                    logger.info("[%s/%s] Сводка %s", i, stats.candidates, doc.eo_number)
                 else:
-                    logger.info("Обработан %s (дозаполнение связей/дельты)", doc.eo_number)
+                    logger.info(
+                        "[%s/%s] Обработан %s (дозаполнение связей/дельты)",
+                        i,
+                        stats.candidates,
+                        doc.eo_number,
+                    )
                 if any(
                     result.get(key)
                     for key in (
