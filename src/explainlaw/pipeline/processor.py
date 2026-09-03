@@ -47,6 +47,9 @@ from explainlaw.storage.object_store import ObjectStorage
 
 logger = logging.getLogger(__name__)
 
+# Без --limit грузим кандидатов порциями, иначе OOM на десятках тысяч selectinload.
+_PROCESS_BATCH_SIZE = 500
+
 
 @dataclass
 class ProcessStats:
@@ -61,6 +64,7 @@ class ProcessStats:
     gates_passed: int = 0
     gates_flagged: int = 0
     excluded_unreadable: int = 0
+    excluded_missing_pdf: int = 0
     skipped: int = 0
     errors: int = 0
     error_details: list[str] = field(default_factory=list)
@@ -78,10 +82,38 @@ class ProcessStats:
             "gates_passed": self.gates_passed,
             "gates_flagged": self.gates_flagged,
             "excluded_unreadable": self.excluded_unreadable,
+            "excluded_missing_pdf": self.excluded_missing_pdf,
             "skipped": self.skipped,
             "errors": self.errors,
             "error_details": self.error_details,
         }
+
+    def merge(self, other: "ProcessStats") -> None:
+        self.candidates += other.candidates
+        self.text_extracted += other.text_extracted
+        self.summarized += other.summarized
+        self.relations_linked += other.relations_linked
+        self.missing_acts_enqueued += other.missing_acts_enqueued
+        self.deltas_built += other.deltas_built
+        self.sectors_assigned += other.sectors_assigned
+        self.act_groups_assigned += other.act_groups_assigned
+        self.gates_passed += other.gates_passed
+        self.gates_flagged += other.gates_flagged
+        self.excluded_unreadable += other.excluded_unreadable
+        self.excluded_missing_pdf += other.excluded_missing_pdf
+        self.skipped += other.skipped
+        self.errors += other.errors
+        self.error_details.extend(other.error_details)
+
+
+def _is_missing_pdf_error(exc: BaseException) -> bool:
+    msg = str(exc).lower()
+    return (
+        "pdf не найден" in msg
+        or "nosuchkey" in msg
+        or "does not exist" in msg
+        or "the specified key does not exist" in msg
+    )
 
 
 class DocumentProcessor:
@@ -113,11 +145,53 @@ class DocumentProcessor:
         self._pravo = pravo or PravoApiClient()
 
     def process(self, *, limit: int | None = None) -> ProcessStats:
+        """Обработать pending-документы.
+
+        Без limit — порциями по _PROCESS_BATCH_SIZE, пока очередь не опустеет
+        (иначе selectinload на десятках тысяч → OOM / silent kill).
+        """
+        if limit is None:
+            aggregate = ProcessStats()
+            batch_no = 0
+            while True:
+                batch_no += 1
+                logger.info("process: порция %s (до %s документов)…", batch_no, _PROCESS_BATCH_SIZE)
+                batch = self._process_batch(limit=_PROCESS_BATCH_SIZE)
+                aggregate.merge(batch)
+                if batch.candidates == 0:
+                    break
+                # Если порция только ошибки без исключений из очереди — стоп (защита от цикла).
+                progressed = (
+                    batch.text_extracted
+                    or batch.summarized
+                    or batch.deltas_built
+                    or batch.excluded_unreadable
+                    or batch.excluded_missing_pdf
+                    or batch.gates_passed
+                    or batch.gates_flagged
+                    or batch.skipped
+                )
+                if not progressed and batch.errors:
+                    logger.error(
+                        "process: порция %s без прогресса (%s ошибок) — останавливаюсь",
+                        batch_no,
+                        batch.errors,
+                    )
+                    break
+            logger.info(
+                "process: готово, кандидатов=%s text=%s sum=%s missing_pdf=%s err=%s",
+                aggregate.candidates,
+                aggregate.text_extracted,
+                aggregate.summarized,
+                aggregate.excluded_missing_pdf,
+                aggregate.errors,
+            )
+            return aggregate
+        return self._process_batch(limit=limit)
+
+    def _process_batch(self, *, limit: int) -> ProcessStats:
         stats = ProcessStats()
-        logger.info(
-            "process: ищу кандидатов%s…",
-            f" (limit={limit})" if limit is not None else "",
-        )
+        logger.info("process: ищу кандидатов (limit=%s)…", limit)
         docs = self._pending_documents(limit)
         stats.candidates = len(docs)
         logger.info("process: кандидатов %s", stats.candidates)
@@ -133,6 +207,10 @@ class DocumentProcessor:
                 if result.get("excluded_unreadable"):
                     stats.excluded_unreadable += 1
                     logger.warning("Исключён (нечитаемый OCR даже после retry) %s", doc.eo_number)
+                    continue
+                if result.get("excluded_missing_pdf"):
+                    stats.excluded_missing_pdf += 1
+                    logger.warning("Исключён (нет PDF в S3/сырье) %s", doc.eo_number)
                     continue
                 if result.get("text_extracted"):
                     stats.text_extracted += 1
@@ -175,6 +253,15 @@ class DocumentProcessor:
                 ):
                     self._session.commit()
             except Exception as exc:
+                if _is_missing_pdf_error(exc):
+                    try:
+                        self._mark_missing_pdf(doc)
+                        stats.excluded_missing_pdf += 1
+                        logger.warning("Исключён (нет PDF) %s: %s", doc.eo_number, exc)
+                        continue
+                    except Exception:
+                        logger.exception("Не удалось пометить missing PDF %s", doc.eo_number)
+                        self._session.rollback()
                 stats.errors += 1
                 stats.error_details.append(f"{doc.eo_number}: {exc}")
                 logger.exception("Ошибка обработки %s", doc.eo_number)
@@ -182,6 +269,25 @@ class DocumentProcessor:
                 continue
 
         return stats
+
+    def _mark_missing_pdf(self, doc: NpaDocument) -> None:
+        """Исключить документ из pending: пустой npa_text с is_unreadable=True."""
+        self._session.rollback()
+        if doc.text is not None:
+            doc.text.is_unreadable = True
+            if not doc.text.full_text:
+                doc.text.full_text = ""
+        else:
+            self._session.add(
+                NpaText(
+                    document_id=doc.id,
+                    full_text="",
+                    extraction_method=TextExtractionMethod.pdf_text,
+                    page_count_extracted=0,
+                    is_unreadable=True,
+                )
+            )
+        self._session.commit()
 
     def _pending_documents(self, limit: int | None) -> list[NpaDocument]:
         load_options = (
@@ -224,6 +330,10 @@ class DocumentProcessor:
             NpaSummary.document_id == NpaDocument.id,
             NpaSummary.gate_status == GateStatus.pending,
         )
+        has_pdf = exists().where(
+            NpaRaw.document_id == NpaDocument.id,
+            NpaRaw.raw_type == RawFileType.pdf,
+        )
         stmt = (
             select(NpaDocument)
             .options(*load_options)
@@ -238,6 +348,8 @@ class DocumentProcessor:
                 )
             )
             .where(NpaText.is_unreadable.isnot(True))
+            # Без текста имеет смысл брать только если есть указатель на PDF.
+            .where(or_(NpaText.id.isnot(None), has_pdf))
             .order_by(
                 NpaText.id.is_(None).desc(),
                 NpaDocument.publish_date_short.desc(),

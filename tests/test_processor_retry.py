@@ -127,3 +127,64 @@ def test_pending_documents_default_branch_excludes_permanently_unreadable(monkey
     stmt = session.execute.call_args.args[0]
     compiled = str(stmt.compile(compile_kwargs={"literal_binds": False}))
     assert "is_unreadable" in compiled
+
+
+def test_missing_pdf_error_detection():
+    assert processor_module._is_missing_pdf_error(ValueError("PDF не найден в сырье"))
+    assert processor_module._is_missing_pdf_error(
+        RuntimeError("S3 operation failed; code: NoSuchKey, message: The specified key does not exist.")
+    )
+    assert not processor_module._is_missing_pdf_error(ValueError("текст слишком короткий"))
+
+
+def test_process_batch_marks_missing_pdf_and_continues(monkeypatch):
+    doc = _doc()
+    session = MagicMock()
+    storage = MagicMock()
+    storage.get_by_path.side_effect = RuntimeError(
+        "S3 operation failed; code: NoSuchKey, message: The specified key does not exist."
+    )
+    proc = DocumentProcessor(session, storage, pravo=MagicMock())
+    monkeypatch.setattr(proc, "_pending_documents", lambda limit: [doc])
+    monkeypatch.setattr(processor_module, "extract_enactments", lambda *a, **k: [])
+    monkeypatch.setattr(processor_module, "extract_relations", lambda *a, **k: [])
+    monkeypatch.setattr(processor_module, "extract_scoped_norm_changes", lambda *a, **k: [])
+    monkeypatch.setattr(processor_module, "build_delta_for_document", lambda *a, **k: None)
+    monkeypatch.setattr(processor_module, "assign_sectors", lambda *a, **k: 0)
+    monkeypatch.setattr(processor_module, "assign_act_group", lambda *a, **k: None)
+    monkeypatch.setattr(processor_module, "enqueue_from_relations", lambda *a, **k: 0)
+    monkeypatch.setattr(
+        processor_module,
+        "extract_text_from_pdf",
+        lambda pdf_bytes: ExtractionResult(text="x", method=TextExtractionMethod.pdf_text, page_count=1),
+    )
+
+    stats = proc._process_batch(limit=10)
+
+    assert stats.candidates == 1
+    assert stats.excluded_missing_pdf == 1
+    assert stats.errors == 0
+    assert stats.text_extracted == 0
+    added = _added_texts(session)
+    assert len(added) == 1
+    assert added[0].is_unreadable is True
+
+
+def test_process_unlimited_runs_batches_until_empty(monkeypatch):
+    session = MagicMock()
+    proc = DocumentProcessor(session, MagicMock(), pravo=MagicMock())
+    calls = {"n": 0}
+
+    def fake_batch(*, limit):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            s = processor_module.ProcessStats(candidates=2, text_extracted=2, summarized=2)
+            return s
+        return processor_module.ProcessStats(candidates=0)
+
+    monkeypatch.setattr(proc, "_process_batch", fake_batch)
+    stats = proc.process(limit=None)
+    assert calls["n"] == 2
+    assert stats.candidates == 2
+    assert stats.text_extracted == 2
+    assert stats.summarized == 2

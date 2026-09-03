@@ -38,7 +38,7 @@ def digest_freshness_start(today: date) -> date:
 
 
 def digest_title_for_day(day: date) -> str:
-    return f"Обзор ФЗ · {format_ru_day(day)}"
+    return f"Обзор НПА · {format_ru_day(day)}"
 
 
 def _current_week_bounds(today: date) -> tuple[date, date]:
@@ -65,7 +65,7 @@ def build_digest_content(
     from explainlaw.gates.text_checks import reflow_soft_linebreaks
 
     label = period_label or week_label or ""
-    lines = [f"Свежие федеральные законы ({label})", ""]
+    lines = [f"Свежие правовые акты ({label})", ""]
     for idx, card in enumerate(cards, start=1):
         if idx > 1:
             lines.append("---")
@@ -81,15 +81,16 @@ def build_digest_content(
 
 
 def build_quiet_day_content(*, day: date) -> str:
-    """Текст на день без новых ФЗ — спокойный, без «ошибок» и пустых списков."""
+    """Текст на день без новых актов в дайджесте — спокойный, без «ошибок»."""
     label = format_ru_day(day)
     return (
         f"За {label} на официальном портале правовых актов "
-        f"новых федеральных законов не публиковали.\n\n"
+        f"не публиковали новых федеральных законов, указов и постановлений "
+        f"для сегодняшнего обзора (или они ещё не прошли проверку).\n\n"
         f"Между сессиями Госдумы такое бывает: несколько тихих дней подряд, "
-        f"затем — пачка поправок за один вечер.\n\n"
+        f"затем — пачка документов за один вечер.\n\n"
         f"Мы смотрим обновления каждый день и пришлём разбор, "
-        f"как только появятся свежие ФЗ.\n\n"
+        f"как только появятся свежие акты.\n\n"
         f"Источник: http://publication.pravo.gov.ru"
     )
 

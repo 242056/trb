@@ -51,7 +51,7 @@ def format_post_for_telegram(*, title: str, content: str) -> str:
     )
     body = re.sub(r"(?m)^(\d+\.\s+.+)$", r"<b>\1</b>", body)
     body = re.sub(
-        r"(?m)^(Свежие федеральные законы(?:\s+\([^)]*\))?)$",
+        r"(?m)^(Свежие (?:правовые акты|федеральные законы)(?:\s+\([^)]*\))?)$",
         r"<b>\1</b>",
         body,
     )
