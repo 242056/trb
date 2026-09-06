@@ -84,6 +84,8 @@ def cmd_process(args: argparse.Namespace) -> int:
             force=args.force,
             amendments_only=args.amendments_only,
             resume=getattr(args, "resume", False),
+            shard_count=getattr(args, "shard_count", None),
+            shard_index=getattr(args, "shard_index", None),
         )
         stats = processor.process(limit=args.limit)
         record_run(session, job_type=PipelineJobType.process, metrics=stats.to_dict())
@@ -100,6 +102,8 @@ def cmd_gate(args: argparse.Namespace) -> int:
             kafka_producer=producer,
             force=args.force,
             amendments_only=args.amendments_only,
+            shard_count=getattr(args, "shard_count", None),
+            shard_index=getattr(args, "shard_index", None),
         )
         stats = runner.run(limit=args.limit)
         record_run(session, job_type=PipelineJobType.gate, metrics=stats.to_dict())
@@ -444,6 +448,18 @@ def main() -> None:
         action="store_true",
         help="Пропускать документы, у которых дельта уже есть",
     )
+    p_process.add_argument(
+        "--shard-count",
+        type=int,
+        default=None,
+        help="Число воркеров (document.id %% count); вместе с --shard-index",
+    )
+    p_process.add_argument(
+        "--shard-index",
+        type=int,
+        default=None,
+        help="Индекс шарда 0..shard-count-1",
+    )
     p_process.set_defaults(func=cmd_process)
 
     p_gate = sub.add_parser("gate", help="Гейты качества (дельта + сводка)")
@@ -454,6 +470,8 @@ def main() -> None:
         action="store_true",
         help="Только поправки с дельтой",
     )
+    p_gate.add_argument("--shard-count", type=int, default=None, help="Число воркеров для шарда")
+    p_gate.add_argument("--shard-index", type=int, default=None, help="Индекс шарда 0..count-1")
     p_gate.set_defaults(func=cmd_gate)
 
     p_publish = sub.add_parser("publish", help="Собрать и опубликовать ежедневную сводку (§7.2)")

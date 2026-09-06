@@ -20,6 +20,7 @@ from explainlaw.db.models import (
 from explainlaw.extraction.changes import is_amendment_law
 from explainlaw.gates.delta_gate import run_delta_gate
 from explainlaw.gates.summary_gate import run_summary_gate
+from explainlaw.pipeline.sharding import apply_id_shard, normalize_shard
 from explainlaw.pipeline.topics import TOPIC_GATE_RESULT
 
 logger = logging.getLogger(__name__)
@@ -34,9 +35,11 @@ class GateRunStats:
     post_bank_added: int = 0
     errors: int = 0
     error_details: list[str] = field(default_factory=list)
+    shard_count: int | None = None
+    shard_index: int | None = None
 
     def to_dict(self) -> dict:
-        return {
+        data = {
             "candidates": self.candidates,
             "passed": self.passed,
             "flagged": self.flagged,
@@ -45,6 +48,10 @@ class GateRunStats:
             "errors": self.errors,
             "error_details": self.error_details,
         }
+        if self.shard_count is not None:
+            data["shard_count"] = self.shard_count
+            data["shard_index"] = self.shard_index
+        return data
 
 
 class GateRunner:
@@ -56,15 +63,21 @@ class GateRunner:
         force: bool = False,
         amendments_only: bool = False,
         publish_date: date | None = None,
+        shard_count: int | None = None,
+        shard_index: int | None = None,
     ) -> None:
         self._session = session
         self._kafka = kafka_producer
         self._force = force
         self._amendments_only = amendments_only
         self._publish_date = publish_date
+        self._shard = normalize_shard(shard_count=shard_count, shard_index=shard_index)
 
     def run(self, *, limit: int | None = None) -> GateRunStats:
         stats = GateRunStats()
+        if self._shard:
+            stats.shard_count, stats.shard_index = self._shard
+            logger.info("gate: shard %s/%s", self._shard[1], self._shard[0])
         docs = self._candidate_documents(limit)
         stats.candidates = len(docs)
 
@@ -120,6 +133,13 @@ class GateRunner:
             stmt = stmt.where(~NpaDocument.name.ilike("%О принятии Протокола%"))
         if self._publish_date is not None:
             stmt = stmt.where(NpaDocument.publish_date_short == self._publish_date)
+        if self._shard:
+            stmt = apply_id_shard(
+                stmt,
+                NpaDocument.id,
+                shard_count=self._shard[0],
+                shard_index=self._shard[1],
+            )
         if limit:
             stmt = stmt.limit(limit)
         return list(self._session.execute(stmt).scalars().unique().all())

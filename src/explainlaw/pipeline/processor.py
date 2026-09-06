@@ -43,6 +43,7 @@ from explainlaw.pipeline.topics import (
     TOPIC_TEXT_EXTRACTED,
 )
 from explainlaw.pravo.client import PravoApiClient
+from explainlaw.pipeline.sharding import apply_id_shard, normalize_shard
 from explainlaw.storage.object_store import ObjectStorage
 
 logger = logging.getLogger(__name__)
@@ -68,9 +69,11 @@ class ProcessStats:
     skipped: int = 0
     errors: int = 0
     error_details: list[str] = field(default_factory=list)
+    shard_count: int | None = None
+    shard_index: int | None = None
 
     def to_dict(self) -> dict:
-        return {
+        data = {
             "candidates": self.candidates,
             "text_extracted": self.text_extracted,
             "summarized": self.summarized,
@@ -87,6 +90,10 @@ class ProcessStats:
             "errors": self.errors,
             "error_details": self.error_details,
         }
+        if self.shard_count is not None:
+            data["shard_count"] = self.shard_count
+            data["shard_index"] = self.shard_index
+        return data
 
     def merge(self, other: "ProcessStats") -> None:
         self.candidates += other.candidates
@@ -104,6 +111,9 @@ class ProcessStats:
         self.skipped += other.skipped
         self.errors += other.errors
         self.error_details.extend(other.error_details)
+        if self.shard_count is None and other.shard_count is not None:
+            self.shard_count = other.shard_count
+            self.shard_index = other.shard_index
 
 
 def _is_missing_pdf_error(exc: BaseException) -> bool:
@@ -132,6 +142,8 @@ class DocumentProcessor:
         min_text_chars: int = 200,
         publish_date: date | None = None,
         pravo: PravoApiClient | None = None,
+        shard_count: int | None = None,
+        shard_index: int | None = None,
     ) -> None:
         self._session = session
         self._storage = storage
@@ -143,6 +155,7 @@ class DocumentProcessor:
         self._min_text_chars = min_text_chars
         self._publish_date = publish_date
         self._pravo = pravo or PravoApiClient()
+        self._shard = normalize_shard(shard_count=shard_count, shard_index=shard_index)
 
     def process(self, *, limit: int | None = None) -> ProcessStats:
         """Обработать pending-документы.
@@ -191,7 +204,11 @@ class DocumentProcessor:
 
     def _process_batch(self, *, limit: int) -> ProcessStats:
         stats = ProcessStats()
+        if self._shard:
+            stats.shard_count, stats.shard_index = self._shard
         logger.info("process: ищу кандидатов (limit=%s)…", limit)
+        if self._shard:
+            logger.info("process: shard %s/%s", self._shard[1], self._shard[0])
         docs = self._pending_documents(limit)
         stats.candidates = len(docs)
         logger.info("process: кандидатов %s", stats.candidates)
@@ -321,6 +338,13 @@ class DocumentProcessor:
                 )
             if self._publish_date is not None:
                 stmt = stmt.where(NpaDocument.publish_date_short == self._publish_date)
+            if self._shard:
+                stmt = apply_id_shard(
+                    stmt,
+                    NpaDocument.id,
+                    shard_count=self._shard[0],
+                    shard_index=self._shard[1],
+                )
             if limit:
                 stmt = stmt.limit(limit)
             return list(self._session.execute(stmt).scalars().unique().all())
@@ -357,6 +381,13 @@ class DocumentProcessor:
         )
         if self._publish_date is not None:
             stmt = stmt.where(NpaDocument.publish_date_short == self._publish_date)
+        if self._shard:
+            stmt = apply_id_shard(
+                stmt,
+                NpaDocument.id,
+                shard_count=self._shard[0],
+                shard_index=self._shard[1],
+            )
         if limit:
             stmt = stmt.limit(limit)
         return list(self._session.execute(stmt).scalars().all())

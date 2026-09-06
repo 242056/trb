@@ -1,0 +1,56 @@
+# Process/gate workers on a second host — same Yandex PG / S3 / Kafka as prod.
+# Does NOT run collect, daily, publish, or Telegram.
+#
+# Two shards (document.id % 2) — ~2× throughput on 4 vCPU / 8 GB.
+#
+#   sudo docker compose -f docker-compose.worker.yml --env-file .env.worker up -d --build
+#   sudo docker compose -f docker-compose.worker.yml logs -f worker-0 worker-1
+#
+# Stop: sudo docker compose -f docker-compose.worker.yml down
+
+x-worker: &worker
+  build:
+    context: .
+    args:
+      PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple}
+      PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-mirrors.aliyun.com}
+  image: regulatory-legal-acts:latest
+  env_file: .env.worker
+  environment: &worker_env
+    TZ: ${TZ:-Europe/Moscow}
+    PYTHONUNBUFFERED: "1"
+    KAFKA_SSL_CA_LOCATION: /usr/local/share/ca-certificates/Yandex/YandexInternalRootCA.crt
+    TELEGRAM_PUBLISH: "false"
+    CRON_DAILY_ENABLED: "false"
+    CRON_WEEKLY_ENABLED: "false"
+    CRON_BACKFILL_ENABLED: "false"
+    CRON_HEALTH_ENABLED: "false"
+    WORKER_SHARD_COUNT: "2"
+    WORKER_PROCESS_LIMIT: ${WORKER_PROCESS_LIMIT:-100}
+    WORKER_LOOP_SLEEP: ${WORKER_LOOP_SLEEP:-15}
+  extra_hosts:
+    - "api.telegram.org:149.154.167.220"
+  volumes:
+    - worker_logs:/app/logs
+  restart: unless-stopped
+  command: ["/app/docker/worker-entrypoint.sh"]
+
+services:
+  worker-0:
+    <<: *worker
+    container_name: regulatory-legal-acts-worker-0
+    environment:
+      <<: *worker_env
+      WORKER_SHARD_INDEX: "0"
+      WORKER_LOG: /app/logs/worker-0.log
+
+  worker-1:
+    <<: *worker
+    container_name: regulatory-legal-acts-worker-1
+    environment:
+      <<: *worker_env
+      WORKER_SHARD_INDEX: "1"
+      WORKER_LOG: /app/logs/worker-1.log
+
+volumes:
+  worker_logs:
