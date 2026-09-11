@@ -32,6 +32,7 @@ class GateRunStats:
     passed: int = 0
     flagged: int = 0
     skipped: int = 0
+    rejected: int = 0
     post_bank_added: int = 0
     errors: int = 0
     error_details: list[str] = field(default_factory=list)
@@ -44,6 +45,7 @@ class GateRunStats:
             "passed": self.passed,
             "flagged": self.flagged,
             "skipped": self.skipped,
+            "rejected": self.rejected,
             "post_bank_added": self.post_bank_added,
             "errors": self.errors,
             "error_details": self.error_details,
@@ -86,6 +88,8 @@ class GateRunner:
                 outcome, created_post = self._run_document(doc)
                 if outcome == "skipped":
                     stats.skipped += 1
+                elif outcome == "rejected":
+                    stats.rejected += 1
                 elif outcome == "passed":
                     stats.passed += 1
                     if created_post:
@@ -98,7 +102,7 @@ class GateRunner:
                 logger.exception("Ошибка гейтов для %s", doc.eo_number)
                 self._session.rollback()
 
-        if stats.passed or stats.flagged:
+        if stats.passed or stats.flagged or stats.rejected:
             self._session.commit()
         return stats
 
@@ -152,7 +156,11 @@ class GateRunner:
         delta = doc.delta
 
         if not delta and not is_amendment_law(doc.name):
-            return "skipped", False
+            # У документа не будет дельты (не закон-поправка) — не оставляем
+            # его в pending навечно, иначе он забивает окно кандидатов
+            # (ORDER BY publish_date_short DESC LIMIT N) на всех будущих запусках.
+            summary.gate_status = GateStatus.rejected
+            return "rejected", False
 
         if self._force:
             self._session.execute(delete(GateFlag).where(GateFlag.document_id == doc.id))
