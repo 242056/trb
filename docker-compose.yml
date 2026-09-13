@@ -47,11 +47,16 @@ services:
         PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple}
         PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-mirrors.aliyun.com}
     container_name: regulatory-legal-acts-cron
-    env_file: .env
+    env_file:
+      - .env
+      - .env.schedule
     environment:
       TZ: ${TZ:-Europe/Moscow}
       CRON_TIMEZONE: ${CRON_TIMEZONE:-Europe/Moscow}
       KAFKA_SSL_CA_LOCATION: /usr/local/share/ca-certificates/Yandex/YandexInternalRootCA.crt
+      # Литерал, не ${CRON_WEEKLY_SCHEDULE}: иначе старый прод .env оставит ежедневный пост.
+      CRON_WEEKLY_SCHEDULE: "0 9 * * 1"
+      CRON_WEEKLY_ENABLED: "true"
     extra_hosts:
       - "api.telegram.org:149.154.167.220"
     volumes:

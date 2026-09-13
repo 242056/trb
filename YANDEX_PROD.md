@@ -55,6 +55,8 @@ sudo docker compose up -d --build
 ./scripts/prod_verify.sh
 ```
 
+Расписание Telegram (пн 09:00) задано в репозитории (`.env.schedule` + литерал в `docker-compose.yml`) и перекрывает старый `CRON_WEEKLY_SCHEDULE` в хостовом `.env`. Править `.env` на хосте для этого не нужно.
+
 Миграции при необходимости: `sudo docker compose exec app alembic upgrade head`.
 
 ---
@@ -166,6 +168,7 @@ sudo docker compose exec app explainlaw publish --mark-published   # тольк�
 | `docker/cron-entrypoint.sh` | crontab из env + RUN_ON_START |
 | `docker/cron-run.sh` | START/OK/FAIL → stdout + `/app/logs/cron.log` |
 | `docker/crontab` | fallback (должен совпадать с render) |
-| `.env.example` | шаблон |
+| `.env.example` | шаблон секретов |
+| `.env.schedule` | расписание Telegram без секретов |
 | `scripts/prod_verify.sh` | проверка после деплоя |
 | `rule.md` | ТЗ |
