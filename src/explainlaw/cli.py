@@ -474,7 +474,7 @@ def main() -> None:
     p_gate.add_argument("--shard-index", type=int, default=None, help="Индекс шарда 0..count-1")
     p_gate.set_defaults(func=cmd_gate)
 
-    p_publish = sub.add_parser("publish", help="Собрать и опубликовать ежедневную сводку (§7.2)")
+    p_publish = sub.add_parser("publish", help="Собрать и опубликовать еженедельную сводку (§7.2)")
     p_publish.add_argument("--min-items", type=int, help="Минимум карточек для полного дайджеста")
     p_publish.add_argument("--max-items", type=int, help="Максимум карточек в дайджесте")
     p_publish.add_argument("--dry-run", action="store_true", help="Только показать отбор, без записи")

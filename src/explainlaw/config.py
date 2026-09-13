@@ -91,7 +91,7 @@ class Settings(BaseSettings):
     alert_telegram_heartbeat: bool = False
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
-    # Слать сводку в Telegram при publish --mark-published (ежедневно)
+    # Слать сводку в Telegram при publish --mark-published (еженедельно)
     telegram_publish: bool = True
     # База Bot API (если DNS/IP api.telegram.org режется провайдером)
     telegram_api_base: str = "https://api.telegram.org"
@@ -115,8 +115,8 @@ class Settings(BaseSettings):
     cron_daily_enabled: bool = True
     cron_daily_schedule: str = "0 8 * * *"
     cron_weekly_enabled: bool = True
-    # Ежедневная сводка в Telegram (имя weekly_* — legacy env)
-    cron_weekly_schedule: str = "0 9 * * *"
+    # Сводка в Telegram раз в неделю (пн 09:00 MSK). Имя weekly_* — legacy env.
+    cron_weekly_schedule: str = "0 9 * * 1"
     cron_backfill_enabled: bool = True
     cron_backfill_schedule: str = "0 3 * * 0"
     cron_health_enabled: bool = False

@@ -32,7 +32,7 @@ def render_crontab(settings: Settings | None = None) -> str:
     daily_args = ["daily", "--process-limit", str(process_limit), "--fetch-missing", str(fetch_missing)]
     daily_cmd = " ".join([bin_path, *daily_args])
 
-    # Пн→каждый день: публикация сводки в Telegram (с тихим днём, если новостей нет).
+    # Понедельник 09:00: дайджест в Telegram (тихий день — только если за неделю нет карточек).
     weekly_cmd = f"{bin_path} publish --mark-published"
     backfill_cmd = f"{bin_path} rebuild-deltas --resume --limit {backfill_limit}"
     health_cmd = f"{bin_path} health --alert"
@@ -43,7 +43,7 @@ def render_crontab(settings: Settings | None = None) -> str:
             settings.cron_weekly_enabled,
             settings.cron_weekly_schedule,
             weekly_cmd,
-            "daily digest + Telegram",
+            "weekly digest + Telegram",
         ),
         (
             settings.cron_backfill_enabled,

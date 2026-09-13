@@ -109,7 +109,7 @@ CRON_RUN_ON_START=false
 | Когда (MSK) | Команда |
 |-------------|---------|
 | каждый день 08:00 | `daily --process-limit 50 --fetch-missing 3` (collect: вчера+сегодня) |
-| каждый день 09:00 | `publish --mark-published` (сводка в Telegram; если новостей нет — тихий день) |
+| **понедельник 09:00** | `publish --mark-published` (сводка в Telegram раз в неделю) |
 | каждый день 08:30 | ~~`health --alert`~~ **выкл.** (`CRON_HEALTH_ENABLED=false`) |
 | вс 03:00 | `rebuild-deltas --resume --limit 500` |
 
@@ -121,7 +121,7 @@ sudo docker compose exec cron cat /tmp/explainlaw.crontab
 
 В crontab **не должно** быть `--weekly-publish`. Weekly = только `publish`.
 
-Сводка: заголовок вида `Обзор НПА · 7 августа 2026` (ФЗ, указы, постановления). Если за день нет актов, прошедших гейты — уходит «тихий день».  
+Сводка: заголовок вида `Обзор НПА · 7 августа 2026` (ФЗ, указы, постановления). Публикация в чат — **раз в неделю** (пн 09:00).  
 OCR soft-wraps склеиваются при публикации.
 
 ---
@@ -153,7 +153,7 @@ sudo docker compose exec app explainlaw publish --mark-published   # тольк�
 - [ ] `alembic upgrade head`
 - [ ] `./scripts/prod_verify.sh` → OK
 - [ ] Qwen-worker слушает Kafka `llm.requests` / `llm.responses`
-- [ ] Бот в TG-группе; каждый день 09:00 — сводка (или тихий день)
+- [ ] Бот в TG-группе; понедельник 09:00 — сводка за неделю
 
 ---
 
