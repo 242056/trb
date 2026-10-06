@@ -147,6 +147,10 @@ def test_short_act_label_compacts_government_resolution():
         "инноваций в Российской Федерации"
     )
     assert _short_act_label(long_name) == long_name
+    huge = ("Очень длинное официальное наименование акта " * 20).strip()
+    compact = _short_act_label(huge)
+    assert compact.endswith("…")
+    assert len(compact) <= 220
 
 
 def test_format_card_content_changes_from_document_name():
