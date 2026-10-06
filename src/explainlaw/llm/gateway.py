@@ -59,7 +59,7 @@ def sanitize_gist_title(title: str | None) -> str:
         return ""
     words = cleaned.split()
     if len(words) > 8:
-        return " ".join(words[:8])
+        return " ".join(words[:8]) + "…"
     return cleaned
 
 

@@ -78,7 +78,7 @@ def test_sanitize_gist_title_strips_official_name():
     assert gateway.sanitize_gist_title("Федеральный закон № 10-ФЗ О таможенном регулировании") == ""
     assert gateway.sanitize_gist_title("Новые штрафы для перевозчиков") == "Новые штрафы для перевозчиков"
     assert gateway.sanitize_gist_title("Один два три четыре пять шесть семь восемь девять") == (
-        "Один два три четыре пять шесть семь восемь"
+        "Один два три четыре пять шесть семь восемь…"
     )
 
 

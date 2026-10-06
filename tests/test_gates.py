@@ -134,6 +134,21 @@ def test_format_card_content_keeps_two_sentences_only():
     assert "Третье лишнее" not in content
 
 
+def test_short_act_label_compacts_government_resolution():
+    from explainlaw.gates.post_bank import _short_act_label
+
+    label = _short_act_label(
+        "О внесении изменения в постановление Правительства Российской Федерации "
+        "от 31 декабря 2020 г. № 2395"
+    )
+    assert label == "ПП РФ от 31 декабря 2020 № 2395"
+    long_name = "Об экспериментальных правовых режимах в сфере цифровых и технологических инноваций в Российской Федерации"
+    compact = _short_act_label(long_name)
+    assert compact.endswith("…")
+    assert len(compact) <= 80
+    assert not compact.endswith("инновац")
+
+
 def test_format_card_content_changes_from_document_name():
     doc = _doc()
     doc.name = 'О внесении изменения в статью 11.26 Кодекса Российской Федерации об административных правонарушениях'
@@ -151,9 +166,9 @@ def test_card_title_uses_gist_not_official_name():
         summary_text="Для перевозчиков без лицензии вырос штраф за пассажиров без документов.",
         title="О внесении изменений в статью 11.26 КоАП РФ",
     )
-    assert card_title(doc, summary) == "Для перевозчиков без лицензии вырос штраф за пассажиров"
+    assert card_title(doc, summary) == "Для перевозчиков без лицензии вырос штраф за пассажиров…"
     assert format_post_title(doc, summary) == (
-        "№1-ФЗ — Для перевозчиков без лицензии вырос штраф за пассажиров"
+        "№1-ФЗ — Для перевозчиков без лицензии вырос штраф за пассажиров…"
     )
 
 
