@@ -142,11 +142,15 @@ def test_short_act_label_compacts_government_resolution():
         "от 31 декабря 2020 г. № 2395"
     )
     assert label == "ПП РФ от 31 декабря 2020 № 2395"
-    long_name = "Об экспериментальных правовых режимах в сфере цифровых и технологических инноваций в Российской Федерации"
-    compact = _short_act_label(long_name)
+    long_name = (
+        "Об экспериментальных правовых режимах в сфере цифровых и технологических "
+        "инноваций в Российской Федерации"
+    )
+    assert _short_act_label(long_name) == long_name
+    huge = ("Очень длинное официальное наименование акта " * 20).strip()
+    compact = _short_act_label(huge)
     assert compact.endswith("…")
-    assert len(compact) <= 80
-    assert not compact.endswith("инновац")
+    assert len(compact) <= 220
 
 
 def test_format_card_content_changes_from_document_name():

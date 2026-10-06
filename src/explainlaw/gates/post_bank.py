@@ -11,7 +11,8 @@ from explainlaw.gates.text_checks import first_n_sentences, reflow_soft_linebrea
 
 _SEE_SOURCE = "см. первоисточник"
 _MAX_CHANGES_IN_LINE = 3
-_MAX_ACT_LABEL_LEN = 80
+# Обычные названия (100–150 знаков) не режем. Потолок — только от совсем длинного OCR-мусора.
+_MAX_ACT_LABEL_LEN = 220
 _PP_FROM_RE = re.compile(
     r"постановлен\w+\s+Правительства(?:\s+Российской Федерации)?\s+от\s+"
     r"(?P<date>\d{1,2}\s+\w+\s+\d{4}|\d{1,2}\.\d{2}\.\d{4})"
@@ -75,6 +76,7 @@ def _enactment_line(doc: NpaDocument) -> str:
 
 
 def _short_act_label(name: str | None, number: str | None = None) -> str:
+    """Подпись для «Меняет:»: кодексы и ПП РФ сжимаем, обычное имя оставляем целиком."""
     raw = re.sub(r"\s+", " ", (name or "").strip().strip('"«»'))
     for pattern, alias in _CODE_ALIASES:
         if pattern.search(raw):
